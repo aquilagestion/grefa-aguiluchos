@@ -1,5 +1,6 @@
 import { esPlausible, utmToLatLon } from './utm.js';
 import { COLUMNAS } from './columns.js';
+import { ubicacion } from './geo.js';
 
 export function estadoReproductivo(n) {
   if (n.resultado_reproductivo === 'Éxito') return 'Éxito';
@@ -27,6 +28,13 @@ export function filtrar(nidos, f) {
   const q = norm(f.texto).trim();
   return nidos.filter((n) => {
     if (f.municipio && n.municipio !== f.municipio) return false;
+    if (f.pais || f.comunidad || f.provincia || f.localidad) {
+      const u = ubicacion(n);
+      if (f.pais && u.pais !== f.pais) return false;
+      if (f.comunidad && u.comunidad !== f.comunidad) return false;
+      if (f.provincia && u.provincia !== f.provincia) return false;
+      if (f.localidad && u.localidad !== f.localidad) return false;
+    }
     if (f.especie && n.especie !== f.especie) return false;
     if (f.proyecto && n.proyecto !== f.proyecto) return false;
     if (f.estado && estadoReproductivo(n) !== f.estado) return false;

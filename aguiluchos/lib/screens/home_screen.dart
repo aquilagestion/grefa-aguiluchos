@@ -10,6 +10,7 @@ import '../models/nido_grefa_model.dart';
 import '../services/excel_import_service.dart';
 import '../services/location_service.dart';
 import '../utils/geo.dart';
+import '../widgets/filtro_geografico.dart';
 import '../widgets/nido_card.dart';
 import '../widgets/nidos_map.dart';
 import '../widgets/responsive.dart';
@@ -31,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   NidoFilter _filter = const NidoFilter();
   _Vista _vista = _Vista.lista;
   List<NidoGrefaModel> _nidos = const [];
-  List<String> _municipios = const [];
+  List<NidoGrefaModel> _todos = const [];
   bool _loading = true;
   StreamSubscription<void>? _sub;
   bool _didInit = false;
@@ -57,18 +58,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _cargar() async {
     final db = AppServices.of(context).db;
-    final nidos = await db.consultar(_filter);
-    final municipios = await db.municipios();
+    final todos = await db.consultar(const NidoFilter());
+    // Si la ubicación filtrada ya no existe (nido borrado o editado), se limpia.
+    final original = _filter;
+    final filtro = sanearGeo(original, todos);
+    final nidos = await db.consultar(filtro);
     if (!mounted) return;
     setState(() {
+      _todos = todos;
       _nidos = nidos;
-      _municipios = municipios;
       _loading = false;
-      // Si el municipio filtrado ya no existe, se limpia el filtro.
-      if (_filter.municipios.isNotEmpty &&
-          !municipios.contains(_filter.municipios.first)) {
-        _filter = _filter.copyWith(municipios: <String>{});
-      }
+      // Solo si el usuario no ha cambiado el filtro mientras tanto.
+      if (identical(_filter, original)) _filter = filtro;
     });
   }
 
@@ -336,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
           child: _Filtros(
             filter: _filter,
-            municipios: _municipios,
+            todos: _todos,
             searchCtrl: _searchCtrl,
             onChanged: _setFilter,
           ),
@@ -374,7 +375,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.all(12),
                 child: _Filtros(
                   filter: _filter,
-                  municipios: _municipios,
+                  todos: _todos,
                   searchCtrl: _searchCtrl,
                   onChanged: _setFilter,
                 ),
@@ -418,21 +419,18 @@ class _HomeScreenState extends State<HomeScreen> {
 class _Filtros extends StatelessWidget {
   const _Filtros({
     required this.filter,
-    required this.municipios,
+    required this.todos,
     required this.searchCtrl,
     required this.onChanged,
   });
 
   final NidoFilter filter;
-  final List<String> municipios;
+  final List<NidoGrefaModel> todos;
   final TextEditingController searchCtrl;
   final ValueChanged<NidoFilter> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final municipioActual =
-        filter.municipios.isEmpty ? null : filter.municipios.first;
-
     final buscador = TextField(
       controller: searchCtrl,
       decoration: InputDecoration(
@@ -451,18 +449,11 @@ class _Filtros extends StatelessWidget {
       onChanged: (v) => onChanged(filter.copyWith(query: v)),
     );
 
-    final municipio = DropdownButtonFormField<String?>(
-      key: ValueKey('mun-$municipioActual-${municipios.length}'),
-      initialValue: municipioActual,
-      isExpanded: true,
-      decoration: const InputDecoration(labelText: 'Municipio'),
-      items: [
-        const DropdownMenuItem<String?>(value: null, child: Text('Todos')),
-        for (final m in municipios)
-          DropdownMenuItem<String?>(value: m, child: Text(m)),
-      ],
-      onChanged: (v) =>
-          onChanged(filter.copyWith(municipios: v == null ? <String>{} : {v})),
+    final ubicacion = FiltroGeografico(
+      nidos: todos,
+      filter: filter,
+      onChanged: onChanged,
+      plegable: true,
     );
 
     final estado = DropdownButtonFormField<EstadoReproductivo>(
@@ -481,11 +472,9 @@ class _Filtros extends StatelessWidget {
       children: [
         buscador,
         const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: municipio),
-          const SizedBox(width: 8),
-          Expanded(child: estado),
-        ]),
+        ubicacion,
+        const SizedBox(height: 8),
+        estado,
       ],
     );
   }

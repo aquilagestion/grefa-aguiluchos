@@ -8,6 +8,7 @@ import '../app/app_services.dart';
 import '../models/nido_grefa_model.dart';
 import '../services/app_directories.dart';
 import '../services/informe_tecnico.dart';
+import '../services/mapa_imagen.dart';
 import '../widgets/entrega_archivos.dart';
 import '../widgets/responsive.dart';
 
@@ -19,6 +20,7 @@ class InformeTecnicoScreen extends StatefulWidget {
     required this.nidos,
     this.filtros = '',
     this.individual = false,
+    this.fabricaMapas,
   });
 
   final List<NidoGrefaModel> nidos;
@@ -28,6 +30,9 @@ class InformeTecnicoScreen extends StatefulWidget {
 
   /// Informe de un solo nido (ficha técnica + conclusiones).
   final bool individual;
+
+  /// Generador de mapas (inyectable en pruebas; por defecto usa OpenStreetMap).
+  final GeneradorMapas Function()? fabricaMapas;
 
   @override
   State<InformeTecnicoScreen> createState() => _InformeTecnicoScreenState();
@@ -44,6 +49,13 @@ class _InformeTecnicoScreenState extends State<InformeTecnicoScreen> {
   final _conclusiones = TextEditingController();
   bool _didInit = false;
   bool _busy = false;
+
+  /// Niveles de mapas de localización a incluir.
+  final Set<String> _nivelesMapa = {'general'};
+  bool _mapaIndividual = true;
+  String? _progreso;
+  List<MapaGenerado>? _mapasCache;
+  String? _mapasClave;
 
   @override
   void didChangeDependencies() {
@@ -132,6 +144,32 @@ class _InformeTecnicoScreenState extends State<InformeTecnicoScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
+  /// Genera (o reutiliza) los mapas según las opciones elegidas.
+  Future<List<MapaGenerado>> _generarMapas() async {
+    final niveles = widget.individual
+        ? (_mapaIndividual ? <String>{'general'} : <String>{})
+        : {..._nivelesMapa};
+    if (niveles.isEmpty) return [];
+    final clave = (niveles.toList()..sort()).join(',');
+    if (_mapasCache != null && _mapasClave == clave) return _mapasCache!;
+    final gen = (widget.fabricaMapas ?? GeneradorMapas.new)();
+    final etiqueta = widget.nidos.isEmpty
+        ? ''
+        : (widget.nidos.first.etiqueta ?? widget.nidos.first.numeracion ?? '');
+    if (mounted) setState(() => _progreso = 'Generando mapas de localización…');
+    final r = await gen.generar(
+      widget.nidos,
+      niveles,
+      tituloGeneral: widget.individual ? 'Nido $etiqueta' : 'Todos los nidos',
+      progreso: (h, t) {
+        if (mounted) setState(() => _progreso = 'Generando mapas de localización ($h/$t)…');
+      },
+    );
+    _mapasCache = r;
+    _mapasClave = clave;
+    return r;
+  }
+
   Future<void> _emitir(Set<String> formatos) async {
     if (!widget.individual && _b.secciones.isEmpty) {
       _snack('Selecciona al menos una sección.');
@@ -140,6 +178,7 @@ class _InformeTecnicoScreenState extends State<InformeTecnicoScreen> {
     _volcar();
     setState(() => _busy = true);
     try {
+      _b.mapas = await _generarMapas();
       final doc = InformeTecnico.construir(_b);
       final archivos = <ArchivoExportado>[];
       if (formatos.contains('pdf')) {
@@ -173,7 +212,12 @@ class _InformeTecnicoScreenState extends State<InformeTecnicoScreen> {
     } catch (e) {
       _snack('Error al generar el informe: $e');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progreso = null;
+        });
+      }
     }
   }
 
@@ -256,7 +300,38 @@ class _InformeTecnicoScreenState extends State<InformeTecnicoScreen> {
               onChanged: (v) => setState(
                   () => v == true ? _b.secciones.add(s) : _b.secciones.remove(s)),
             ),
-        ],
+          const SizedBox(height: 8),
+          Text('Mapas de localización', style: Theme.of(context).textTheme.titleLarge),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 4),
+            child: Text(
+                'Un mapa por grupo, con los nidos coloreados por resultado. Usa el mapa de OpenStreetMap (necesita conexión; sin ella solo se dibujan los puntos).',
+                style: TextStyle(fontSize: 12)),
+          ),
+          for (final (clave, etiqueta) in const [
+            ('general', 'General (todos los nidos)'),
+            ('comunidad', 'Por comunidades autónomas'),
+            ('provincia', 'Por provincias'),
+            ('localidad', 'Por localidades'),
+          ])
+            CheckboxListTile(
+              key: Key('mapa-$clave'),
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: Text(etiqueta),
+              value: _nivelesMapa.contains(clave),
+              onChanged: (v) => setState(
+                  () => v == true ? _nivelesMapa.add(clave) : _nivelesMapa.remove(clave)),
+            ),
+        ] else if (widget.nidos.length == 1 && widget.nidos.first.tieneCoordenadas)
+          CheckboxListTile(
+            key: const Key('mapa-individual'),
+            dense: true,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('Incluir mapa de localización del nido'),
+            value: _mapaIndividual,
+            onChanged: (v) => setState(() => _mapaIndividual = v == true),
+          ),
         const SizedBox(height: 8),
         Text('Textos del informe', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
@@ -302,6 +377,11 @@ class _InformeTecnicoScreenState extends State<InformeTecnicoScreen> {
           padding: const EdgeInsets.all(12),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             if (_busy) const LinearProgressIndicator(),
+            if (_progreso != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(_progreso!, style: const TextStyle(fontSize: 12)),
+              ),
             const SizedBox(height: 8),
             Wrap(spacing: 10, runSpacing: 8, alignment: WrapAlignment.center, children: [
               FilledButton.icon(

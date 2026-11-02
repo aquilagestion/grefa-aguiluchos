@@ -7,6 +7,7 @@ import {
   registrar, recuperarClave, cambiarClave,
 } from './api.js';
 import { COLUMNAS, FASES, ESPECIES, PROYECTOS } from './columns.js';
+import { opcionesCascada } from './geo.js';
 import { abrirInformesUI } from './informe_ui.js';
 import {
   aCsv, aplicarCambio, estadoReproductivo, filtrar, googleMapsUrl, parseValor, posicion, resumen, validar,
@@ -19,7 +20,7 @@ const estado = {
   nidos: [],
   cargando: false,
   error: null,
-  filtro: { texto: '', municipio: '', especie: '', proyecto: '', estado: '' },
+  filtro: { texto: '', pais: '', comunidad: '', provincia: '', localidad: '', especie: '', proyecto: '', estado: '' },
   orden: { clave: 'numeracion', asc: true },
   vista: 'tabla',
   mapa: null,
@@ -332,36 +333,54 @@ function pintarContenido() {
   else pintarTabla(lista);
 }
 
+const FILTRO_VACIO = { texto: '', pais: '', comunidad: '', provincia: '', localidad: '', especie: '', proyecto: '', estado: '' };
+
 function pintarFiltros(todos) {
   const el = document.getElementById('filtros');
   if (el.dataset.listo && document.activeElement?.closest('#filtros')) return;
-  const municipios = [...new Set(todos.map((n) => n.municipio).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
-  const opts = (vals, sel) => `<option value="">Todos</option>${vals.map((v) => `<option ${v === sel ? 'selected' : ''}>${esc(v)}</option>`).join('')}`;
   const f = estado.filtro;
+  const cas = opcionesCascada(todos, f);
+  // Si la selección de un nivel ya no existe tras cambiar el superior, se limpia.
+  if (f.comunidad && !cas.comunidades.includes(f.comunidad)) f.comunidad = '';
+  if (f.provincia && !cas.provincias.includes(f.provincia)) f.provincia = '';
+  if (f.localidad && !cas.localidades.includes(f.localidad)) f.localidad = '';
+  const opts = (vals, sel, todosTxt) => `<option value="">${todosTxt}</option>${vals.map((v) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`).join('')}`;
   el.innerHTML = `
-    <input type="search" id="f-texto" placeholder="Buscar etiqueta, propietario, municipio…" value="${esc(f.texto)}" />
-    <select id="f-municipio" title="Municipio">${opts(municipios, f.municipio).replace('Todos', 'Municipio: todos')}</select>
-    <select id="f-especie" title="Especie">${opts(ESPECIES, f.especie).replace('Todos', 'Especie: todas')}</select>
-    <select id="f-proyecto" title="Proyecto">${opts(PROYECTOS, f.proyecto).replace('Todos', 'Proyecto: todos')}</select>
-    <select id="f-estado" title="Estado reproductivo">${opts(['Éxito', 'Fracaso', 'En curso'], f.estado).replace('Todos', 'Estado: todos')}</select>
+    <input type="search" id="f-texto" placeholder="Buscar etiqueta, propietario, localidad…" value="${esc(f.texto)}" />
+    <select id="f-pais" title="País">${opts(cas.paises, f.pais, 'País: todos')}</select>
+    <select id="f-comunidad" title="Comunidad autónoma">${opts(cas.comunidades, f.comunidad, 'Comunidad: todas')}</select>
+    <select id="f-provincia" title="Provincia">${opts(cas.provincias, f.provincia, 'Provincia: todas')}</select>
+    <select id="f-localidad" title="Localidad">${opts(cas.localidades, f.localidad, 'Localidad: todas')}</select>
+    <select id="f-especie" title="Especie">${opts(ESPECIES, f.especie, 'Especie: todas')}</select>
+    <select id="f-proyecto" title="Proyecto">${opts(PROYECTOS, f.proyecto, 'Proyecto: todos')}</select>
+    <select id="f-estado" title="Estado reproductivo">${opts(['Éxito', 'Fracaso', 'En curso'], f.estado, 'Estado: todos')}</select>
     <button class="btn" id="f-limpiar">Limpiar</button>`;
   el.dataset.listo = '1';
+  // Al cambiar un nivel geográfico se reinician los inferiores y se repinta la cascada.
+  const NIVELES = ['pais', 'comunidad', 'provincia', 'localidad'];
   const enlazar = (id, clave, evento = 'change') =>
-    (document.getElementById(id).addEventListener(evento, (ev) => { estado.filtro[clave] = ev.target.value; pintarContenido(); }));
+    (document.getElementById(id).addEventListener(evento, (ev) => {
+      estado.filtro[clave] = ev.target.value;
+      const i = NIVELES.indexOf(clave);
+      if (i >= 0) {
+        for (const inferior of NIVELES.slice(i + 1)) estado.filtro[inferior] = '';
+        el.dataset.listo = '';
+      }
+      pintarContenido();
+    }));
   enlazar('f-texto', 'texto', 'input');
-  enlazar('f-municipio', 'municipio');
+  for (const n of NIVELES) enlazar(`f-${n}`, n);
   enlazar('f-especie', 'especie');
   enlazar('f-proyecto', 'proyecto');
   enlazar('f-estado', 'estado');
   document.getElementById('f-limpiar').onclick = () => {
-    estado.filtro = { texto: '', municipio: '', especie: '', proyecto: '', estado: '' };
+    estado.filtro = { ...FILTRO_VACIO };
     el.dataset.listo = '';
     pintarContenido();
   };
 }
-
 const TABLA_COLS = [
-  ['numeracion', 'Nº'], ['etiqueta', 'Etiqueta'], ['municipio', 'Municipio'], ['especie', 'Especie'],
+  ['numeracion', 'Nº'], ['etiqueta', 'Etiqueta'], ['municipio', 'Localidad'], ['provincia', 'Provincia'], ['especie', 'Especie'],
   ['estado_final', 'Estado final'], ['estado', 'Estado'], ['num_pollos_nacidos', 'Nac.'],
   ['num_pollos_volados', 'Vol.'], ['num_pollos_muertos', 'Muer.'], ['intervencion', 'Interv.'],
 ];
@@ -377,7 +396,7 @@ function pintarTabla(lista) {
   const filas = lista.slice(0, 1500).map((n) => {
     const e = estadoReproductivo(n);
     return `<tr data-id="${esc(n.id)}">
-      <td>${esc(n.numeracion)}</td><td><b>${esc(n.etiqueta)}</b></td><td>${esc(n.municipio)}</td>
+      <td>${esc(n.numeracion)}</td><td><b>${esc(n.etiqueta)}</b></td><td>${esc(n.municipio)}</td><td>${esc(n.provincia)}</td>
       <td>${esc(n.especie)}</td><td>${esc(n.estado_final)}</td>
       <td><span class="chip ${claseEstado(e)}">${e}</span></td>
       <td class="num">${esc(n.num_pollos_nacidos)}</td><td class="num">${esc(n.num_pollos_volados)}</td>
@@ -608,7 +627,10 @@ function describirFiltros() {
   const f = estado.filtro;
   return [
     f.texto && `texto «${f.texto}»`,
-    f.municipio && `municipio: ${f.municipio}`,
+    f.pais && `país: ${f.pais}`,
+    f.comunidad && `comunidad: ${f.comunidad}`,
+    f.provincia && `provincia: ${f.provincia}`,
+    f.localidad && `localidad: ${f.localidad}`,
     f.especie && `especie: ${f.especie}`,
     f.proyecto && `proyecto: ${f.proyecto}`,
     f.estado && `estado: ${f.estado}`,

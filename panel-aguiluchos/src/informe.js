@@ -3,6 +3,7 @@
 // que la persona que firma puede modificar libremente antes de emitir el informe.
 import { COLUMNAS, FASES } from './columns.js';
 import { estadoReproductivo, googleMapsUrl, posicion, resumen } from './logic.js';
+import { agruparPorNivel, ubicacion } from './geo.js';
 
 export const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -11,7 +12,9 @@ export const SECCIONES = [
   { id: 'alcance', label: 'Objeto y alcance', defecto: true },
   { id: 'resumen', label: 'Resumen ejecutivo (indicadores)', defecto: true },
   { id: 'especies', label: 'Resultados por especie', defecto: true },
-  { id: 'municipios', label: 'Resultados por municipio', defecto: true },
+  { id: 'comunidades', label: 'Resultados por comunidad autónoma', defecto: true },
+  { id: 'provincias', label: 'Resultados por provincia', defecto: true },
+  { id: 'municipios', label: 'Resultados por localidad', defecto: true },
   { id: 'causas', label: 'Causas de fracaso', defecto: true },
   { id: 'intervenciones', label: 'Intervenciones de conservación', defecto: true },
   { id: 'relacion', label: 'Relación de nidos y justificaciones', defecto: true },
@@ -79,6 +82,11 @@ export function agrupar(nidos, clave) {
     .sort((a, b) => b.total - a.total || a.nombre.localeCompare(b.nombre, 'es'));
 }
 
+/** Estadísticas por nivel geográfico ('comunidad' | 'provincia' | 'localidad'). */
+export function agruparGeo(nidos, nivel) {
+  return agruparPorNivel(nidos, nivel).map(([nombre, lista]) => ({ nombre, ...resumen(lista) }));
+}
+
 /** Pollos nacidos que no constan ni como volados ni como muertos (nido a nido). */
 export function pollosSinDeterminar(nidos) {
   return nidos.reduce((a, n) => (n.num_pollos_nacidos == null
@@ -108,11 +116,13 @@ export function incidencias(nidos) {
 export function textoAlcance(nidos, o) {
   const especies = [...new Set(nidos.map((n) => n.especie).filter(Boolean))];
   const municipios = [...new Set(nidos.map((n) => n.municipio).filter(Boolean))];
-  const provincias = [...new Set(nidos.map((n) => n.provincia).filter(Boolean))];
+  const ubic = nidos.map(ubicacion);
+  const comunidades = [...new Set(ubic.map((u) => u.comunidad).filter((c) => c !== 'Sin indicar'))];
+  const provincias = [...new Set(ubic.map((u) => u.provincia).filter((p) => p !== 'Sin indicar'))];
   const filtros = o.filtros ? ` Filtros aplicados: ${o.filtros}.` : ' Sin filtros adicionales (conjunto completo de la campaña).';
   return `El presente informe recoge los resultados del seguimiento reproductor de aguiluchos de la campaña ${o.anio}, desarrollado por GREFA (Grupo para la Rehabilitación de la Fauna Autóctona y su Hábitat), `
     + `a partir de los registros de campo de la base de datos de la campaña, con fecha de corte ${fechaLarga(o.fecha)}. `
-    + `Se analizan ${nidos.length} nido(s)${especies.length ? ` de ${especies.join(', ')}` : ''}, localizados en ${municipios.length} municipio(s)${provincias.length ? ` (${provincias.join(', ')})` : ''}.${filtros}`;
+    + `Se analizan ${nidos.length} nido(s)${especies.length ? ` de ${especies.join(', ')}` : ''}, localizados en ${municipios.length} localidad(es)${provincias.length ? `, ${provincias.length} provincia(s) (${provincias.join(', ')})` : ''}${comunidades.length ? ` y ${comunidades.length} comunidad(es) autónoma(s) (${comunidades.join(', ')})` : ''}.${filtros}`;
 }
 
 export function textoConclusiones(nidos) {
@@ -220,6 +230,32 @@ function seccionIntervenciones(nidos) {
     tabla(['Nido', 'Municipio', 'Tipo de manejo', 'Resultado', 'Observaciones'], filas)}`;
 }
 
+const LEYENDA_MAPA = '<p class="leyenda"><span class="pt" style="background:#2e6b3a"></span> Éxito &nbsp; <span class="pt" style="background:#c0392b"></span> Fracaso &nbsp; <span class="pt" style="background:#e08a1e"></span> En curso</p>';
+
+/**
+ * Mapas de localización ya renderizados (imágenes PNG en data URL).
+ * @param {{nivel:string, titulo:string, n:number, dataUrl:string}[]} mapas
+ */
+export function seccionMapas(mapas, sinCoordenadas = 0) {
+  const fig = (m) => `<figure class="mapa"><img src="${esc(m.dataUrl)}" alt="${esc(m.titulo)}"><figcaption>${esc(m.titulo)} · ${m.n} nido(s)</figcaption></figure>`;
+  const general = mapas.filter((m) => m.nivel === 'general');
+  const resto = mapas.filter((m) => m.nivel !== 'general');
+  const niveles = [['comunidad', 'Por comunidad autónoma'], ['provincia', 'Por provincia'], ['localidad', 'Por localidad']];
+  let html = LEYENDA_MAPA;
+  for (const m of general) html += fig(m);
+  for (const [nivel, titulo] of niveles) {
+    const del = resto.filter((m) => m.nivel === nivel);
+    if (!del.length) continue;
+    html += `<h3>${titulo}</h3><table class="mapas">`;
+    for (let k = 0; k < del.length; k += 2) {
+      html += `<tr><td>${fig(del[k])}</td><td>${del[k + 1] ? fig(del[k + 1]) : ''}</td></tr>`;
+    }
+    html += '</table>';
+  }
+  if (sinCoordenadas > 0) html += `<p class="nota">${sinCoordenadas} nido(s) sin coordenadas válidas no aparecen en los mapas.</p>`;
+  return html;
+}
+
 function seccionRelacion(nidos) {
   const filas = nidos.map((n) => [
     esc(n.numeracion), `<b>${esc(n.etiqueta)}</b>`, esc(n.municipio), esc(n.especie),
@@ -295,8 +331,11 @@ export function construirInforme(nidos, o) {
 
   add('alcance', 'Objeto y alcance', parrafo(textoAlcance(nidos, opts)));
   add('resumen', 'Resumen ejecutivo', seccionResumen(nidos));
+  if (o.mapas?.length) bloques.push(seccion(++i, 'Mapas de localización', seccionMapas(o.mapas, o.sinCoordenadas)));
   add('especies', 'Resultados por especie', tabla(CABS_GRUPO('Especie'), agrupar(nidos, 'especie').map(filaGrupo), CLASES_GRUPO));
-  add('municipios', 'Resultados por municipio', tabla(CABS_GRUPO('Municipio'), agrupar(nidos, 'municipio').map(filaGrupo), CLASES_GRUPO));
+  add('comunidades', 'Resultados por comunidad autónoma', tabla(CABS_GRUPO('Comunidad autónoma'), agruparGeo(nidos, 'comunidad').map(filaGrupo), CLASES_GRUPO));
+  add('provincias', 'Resultados por provincia', tabla(CABS_GRUPO('Provincia'), agruparGeo(nidos, 'provincia').map(filaGrupo), CLASES_GRUPO));
+  add('municipios', 'Resultados por localidad', tabla(CABS_GRUPO('Localidad'), agruparGeo(nidos, 'localidad').map(filaGrupo), CLASES_GRUPO));
   add('causas', 'Causas de fracaso', seccionCausas(nidos));
   add('intervenciones', 'Intervenciones de conservación', seccionIntervenciones(nidos));
   add('relacion', 'Relación de nidos y justificaciones', nidos.length ? seccionRelacion(orden) : '<p>No hay nidos que cumplan los filtros seleccionados.</p>');
@@ -312,6 +351,7 @@ export function construirInforme(nidos, o) {
 export function construirInformeNido(n, o) {
   const opts = { anio: anioCampana([n], o.fecha), ...o };
   const cuerpo = `${portada(opts, `Nido ${n.etiqueta || n.numeracion || ''}`)}
+    ${o.mapas?.length ? `<h2>Mapa de localización</h2>${seccionMapas(o.mapas)}` : ''}
     ${fichaHtml(n)}
     ${seccion(1, 'Observaciones y conclusiones', parrafo(textoConclusionesNido(n)))}
     <div class="firma"><div>${esc(opts.autor || '')}</div><div class="cargo">${esc(opts.cargo || '')}</div><div class="linea">Firma y sello</div></div>`;
@@ -347,6 +387,13 @@ thead { display: table-header-group; }
 .chip { display: inline-block; font-size: 8.5pt; padding: 0 8px; border-radius: 10px; color: #fff; vertical-align: middle; }
 .chip.exito { background: #2e6b3a; } .chip.fracaso { background: #c0392b; } .chip.curso { background: #e08a1e; }
 .anexo .ficha { break-before: page; }
+figure.mapa { margin: 6px 0 10px; break-inside: avoid; }
+figure.mapa img { width: 100%; height: auto; border: 1px solid #c9d6cc; }
+figure.mapa figcaption { font-size: 8.5pt; color: #444; text-align: center; }
+table.mapas { table-layout: fixed; }
+table.mapas td { width: 50%; padding: 2px 4px; vertical-align: top; }
+.leyenda { font-size: 9pt; text-align: left; }
+.pt { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
 .firma { margin-top: 36px; width: 55%; break-inside: avoid; }
 .firma .cargo { color: #555; font-size: 9.5pt; }
 .firma .linea { margin-top: 38px; border-top: 1px solid #333; padding-top: 2px; font-size: 8.5pt; color: #555; }

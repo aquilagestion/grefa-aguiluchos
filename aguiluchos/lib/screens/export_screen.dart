@@ -7,7 +7,9 @@ import '../models/nido_filter.dart';
 import '../models/nido_grefa_model.dart';
 import '../services/export_service.dart';
 import 'informe_tecnico_screen.dart';
+import '../utils/geografia.dart';
 import '../widgets/entrega_archivos.dart';
+import '../widgets/filtro_geografico.dart';
 import '../widgets/responsive.dart';
 
 /// Exportación a Excel y PDF con filtros y selector de columnas a la carta.
@@ -27,7 +29,8 @@ class _ExportScreenState extends State<ExportScreen> {
 
   DateTimeRange? _rango;
   final Set<String> _municipiosSel = {};
-  List<String> _municipios = const [];
+  NidoFilter _geo = const NidoFilter();
+  List<NidoGrefaModel> _todos = const [];
   EstadoReproductivo _estado = EstadoReproductivo.todos;
   final Set<String> _columnas = {for (final c in nidoColumns) c.key};
   int? _coinciden;
@@ -36,6 +39,10 @@ class _ExportScreenState extends State<ExportScreen> {
 
   NidoFilter get _filter => NidoFilter(
         municipios: _municipiosSel,
+        pais: _geo.pais,
+        comunidad: _geo.comunidad,
+        provincia: _geo.provincia,
+        localidad: _geo.localidad,
         estado: _estado,
         fechaDesde: _rango?.start,
         fechaHasta: _rango?.end,
@@ -47,8 +54,8 @@ class _ExportScreenState extends State<ExportScreen> {
     if (_didInit) return;
     _didInit = true;
     final db = AppServices.of(context).db;
-    db.municipios().then((m) {
-      if (mounted) setState(() => _municipios = m);
+    db.consultar(const NidoFilter()).then((t) {
+      if (mounted) setState(() => _todos = t);
     });
     _contar();
   }
@@ -63,10 +70,18 @@ class _ExportScreenState extends State<ExportScreen> {
     return [
       if (_rango != null)
         'campaña ${f.format(_rango!.start)} - ${f.format(_rango!.end)}',
+      if (_geo.tieneFiltroGeografico) 'ubicación: ${resumenGeo(_geo)}',
       if (_municipiosSel.isNotEmpty) 'municipios: ${_municipiosSel.join(', ')}',
       if (_estado != EstadoReproductivo.todos) 'estado: ${_estado.etiqueta}',
     ].join(' | ');
   }
+
+  /// Localidades que existen dentro de la ubicación elegida (sin «Sin indicar»).
+  List<String> get _localidadesDisponibles => opcionesCascada(_todos,
+          pais: _geo.pais, comunidad: _geo.comunidad, provincia: _geo.provincia)
+      .localidades
+      .where((l) => l != sinDato)
+      .toList();
 
   List<NidoColumn> get _columnasSeleccionadas =>
       nidoColumns.where((c) => _columnas.contains(c.key)).toList();
@@ -206,14 +221,32 @@ class _ExportScreenState extends State<ExportScreen> {
           },
         ),
         const SizedBox(height: 16),
-        Text('Municipios (vacío = todos)',
+        Text('Ubicación', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 6),
+        FiltroGeografico(
+          nidos: _todos,
+          filter: _geo,
+          onChanged: (g) {
+            setState(() {
+              _geo = g;
+              // Las localidades marcadas deben seguir dentro de la ubicación elegida.
+              final validas = opcionesCascada(_todos,
+                      pais: g.pais, comunidad: g.comunidad, provincia: g.provincia)
+                  .localidades;
+              _municipiosSel.removeWhere((m) => !validas.contains(m));
+            });
+            _contar();
+          },
+        ),
+        const SizedBox(height: 16),
+        Text('Localidades (selección múltiple; vacío = todas las de la ubicación)',
             style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 6),
-        if (_municipios.isEmpty)
-          const Text('Aún no hay municipios registrados.')
+        if (_localidadesDisponibles.isEmpty)
+          const Text('Aún no hay localidades registradas.')
         else
           Wrap(spacing: 8, runSpacing: 4, children: [
-            for (final m in _municipios)
+            for (final m in _localidadesDisponibles)
               FilterChip(
                 label: Text(m),
                 selected: _municipiosSel.contains(m),

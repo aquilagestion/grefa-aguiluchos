@@ -3,6 +3,9 @@ import {
   SECCIONES, anioCampana, construirInforme, construirInformeNido, documentoHtml, esc, nombreArchivo,
   referenciaPorDefecto,
 } from './informe.js';
+import { agruparPorNivel } from './geo.js';
+import { posicion } from './logic.js';
+import { generarMapas } from './mapa_img.js';
 
 const CLAVE_FIRMA = 'aguiluchos.informeFirma';
 
@@ -75,6 +78,15 @@ export function abrirInformesUI(ctx) {
         ${nido ? '' : `
         <fieldset><legend>Secciones del informe</legend>
           <div class="checks">${SECCIONES.map((s) => `<label><input type="checkbox" name="inf-sec" value="${s.id}" ${s.defecto ? 'checked' : ''}/> ${esc(s.label)}</label>`).join('')}</div>
+        </fieldset>
+        <fieldset><legend>Mapas de localización</legend>
+          <div class="checks">
+            <label><input type="checkbox" name="inf-mapa" value="general" checked/> General (todos los nidos)</label>
+            <label><input type="checkbox" name="inf-mapa" value="comunidad"/> Por comunidades autónomas</label>
+            <label><input type="checkbox" name="inf-mapa" value="provincia"/> Por provincias</label>
+            <label><input type="checkbox" name="inf-mapa" value="localidad"/> Por localidades</label>
+          </div>
+          <div class="info">Se genera un mapa por grupo, con los nidos coloreados por resultado, sobre el mapa de OpenStreetMap (con conexión; sin ella solo se dibujan los puntos). Más niveles = más mapas y más tiempo.</div>
         </fieldset>`}
       </div>
       <div class="dlg-pie">
@@ -82,8 +94,10 @@ export function abrirInformesUI(ctx) {
         <button type="submit" class="btn primario" id="inf-generar">Generar borrador</button>
       </div></form>`;
     document.getElementById('inf-cerrar').onclick = () => dlg.close();
-    document.getElementById('inf-form').onsubmit = (ev) => {
+    document.getElementById('inf-form').onsubmit = async (ev) => {
       ev.preventDefault();
+      const aviso = (t) => { document.getElementById('inf-msg').textContent = t; };
+      const boton = document.getElementById('inf-generar');
       const val = (id) => document.getElementById(id).value.trim();
       const opciones = {
         titulo: val('inf-titulo') || tituloDef,
@@ -96,8 +110,16 @@ export function abrirInformesUI(ctx) {
       };
       guardarFirma({ autor: opciones.autor, cargo: opciones.cargo, destinatario: opciones.destinatario });
       let cuerpo;
+      boton.disabled = true;
+      try {
       if (nido) {
-        cuerpo = construirInformeNido(nido, opciones);
+        let mapas = [];
+        if (posicion(nido)) {
+          aviso('Generando el mapa de localización…');
+          mapas = await generarMapas([nido], { general: true }, agruparPorNivel);
+          mapas.forEach((m) => { m.titulo = nido.etiqueta || nido.numeracion || 'Nido'; });
+        }
+        cuerpo = construirInformeNido(nido, { ...opciones, mapas });
       } else {
         const lista = document.getElementById('inf-ambito').value === 'todos' ? ctx.todos : ctx.seleccion;
         const secciones = [...document.querySelectorAll('input[name="inf-sec"]:checked')].map((i) => i.value);
@@ -109,9 +131,27 @@ export function abrirInformesUI(ctx) {
           document.getElementById('inf-msg').textContent = 'No hay nidos en el ámbito elegido.';
           return;
         }
-        cuerpo = construirInforme(lista, { ...opciones, filtros: lista === ctx.todos ? '' : ctx.filtros, secciones });
+        const niveles = Object.fromEntries(
+          [...document.querySelectorAll('input[name="inf-mapa"]')].map((i) => [i.value, i.checked]),
+        );
+        let mapas = [];
+        if (Object.values(niveles).some(Boolean)) {
+          mapas = await generarMapas(lista, niveles, agruparPorNivel, (h, t) => aviso(`Generando mapas de localización (${h}/${t})…`));
+        }
+        cuerpo = construirInforme(lista, {
+          ...opciones,
+          filtros: lista === ctx.todos ? '' : ctx.filtros,
+          secciones,
+          mapas,
+          sinCoordenadas: lista.filter((n) => !posicion(n)).length,
+        });
       }
       pintarEditor(documentoHtml(cuerpo, opciones.titulo), opciones);
+      } catch (e) {
+        aviso(`No se pudo generar el informe: ${e.message ?? e}`);
+      } finally {
+        boton.disabled = false; // si el editor ya sustituyó el formulario, no tiene efecto
+      }
     };
   };
 

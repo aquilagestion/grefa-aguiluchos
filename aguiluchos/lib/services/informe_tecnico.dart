@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -7,6 +8,8 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../models/nido_constants.dart';
 import '../models/nido_grefa_model.dart';
+import '../utils/geografia.dart';
+import 'mapa_imagen.dart';
 
 /// Informe técnico completo (equivalente al de la web): datos calculados con
 /// precisión + textos redactados que la persona que firma puede editar antes
@@ -18,7 +21,9 @@ enum SeccionInforme {
   alcance('Objeto y alcance', true),
   resumen('Resumen ejecutivo (indicadores)', true),
   especies('Resultados por especie', true),
-  municipios('Resultados por municipio', true),
+  comunidades('Resultados por comunidad autónoma', true),
+  provincias('Resultados por provincia', true),
+  municipios('Resultados por localidad', true),
   causas('Causas de fracaso', true),
   intervenciones('Intervenciones de conservación', true),
   relacion('Relación de nidos y justificaciones', true),
@@ -247,11 +252,16 @@ class InformeBorrador {
   late String conclusiones;
   late Map<String, String> justificaciones;
 
+  /// Mapas de localización ya generados (se incrustan tras el resumen).
+  List<MapaGenerado> mapas = [];
+
   /// Borrador del apartado «Objeto y alcance».
   String textoAlcance() {
     final especies = {for (final n in nidos) if ((n.especie ?? '').isNotEmpty) n.especie!}.toList();
     final municipios = {for (final n in nidos) if ((n.municipio ?? '').isNotEmpty) n.municipio!}.toList();
-    final provincias = {for (final n in nidos) if ((n.provincia ?? '').isNotEmpty) n.provincia!}.toList();
+    final ubic = [for (final n in nidos) ubicacionDe(n)];
+    final comunidades = {for (final u in ubic) if (u.comunidad != sinDato) u.comunidad}.toList();
+    final provincias = {for (final u in ubic) if (u.provincia != sinDato) u.provincia}.toList();
     final f = filtros.isNotEmpty
         ? ' Filtros aplicados: $filtros.'
         : ' Sin filtros adicionales (conjunto completo de la campaña).';
@@ -259,7 +269,9 @@ class InformeBorrador {
         'desarrollado por GREFA (Grupo para la Rehabilitación de la Fauna Autóctona y su Hábitat), a partir de los registros de campo de la base de datos de la campaña, '
         'con fecha de corte ${fechaLargaInforme(fecha)}. '
         'Se analizan ${nidos.length} nido(s)${especies.isNotEmpty ? ' de ${especies.join(', ')}' : ''}, '
-        'localizados en ${municipios.length} municipio(s)${provincias.isNotEmpty ? ' (${provincias.join(', ')})' : ''}.$f';
+        'localizados en ${municipios.length} localidad(es)'
+        '${provincias.isNotEmpty ? ', ${provincias.length} provincia(s) (${provincias.join(', ')})' : ''}'
+        '${comunidades.isNotEmpty ? ' y ${comunidades.length} comunidad(es) autónoma(s) (${comunidades.join(', ')})' : ''}.$f';
   }
 
   /// Borrador del apartado «Observaciones y conclusiones».
@@ -359,6 +371,13 @@ class BFirma extends Bloque {
   final String cargo;
 }
 
+/// Rejilla de mapas (imágenes) con su pie de foto.
+class BMapas extends Bloque {
+  BMapas(this.mapas, {this.columnas = 2});
+  final List<MapaGenerado> mapas;
+  final int columnas;
+}
+
 class BSalto extends Bloque {}
 
 class InformeDocumento {
@@ -387,6 +406,11 @@ class InformeTecnico {
     ];
 
     if (b.individual && b.nidos.length == 1) {
+      if (b.mapas.isNotEmpty) {
+        bl.add(BTitulo('Mapa de localización', 2));
+        bl.add(BMapas(b.mapas, columnas: 1));
+        bl.add(BNota(leyendaMapa));
+      }
       bl.addAll(_ficha(b.nidos.first, b, nivel: 2));
       bl.add(BTitulo('1. Observaciones y conclusiones', 2));
       bl.add(BParrafo(b.conclusiones));
@@ -411,13 +435,25 @@ class InformeTecnico {
     if (s.contains(SeccionInforme.resumen)) {
       bl..add(BTitulo(t('Resumen ejecutivo'), 2))..add(_resumen(b.nidos));
     }
+    if (b.mapas.isNotEmpty) {
+      bl.add(BTitulo(t('Mapas de localización'), 2));
+      bl.addAll(_mapas(b));
+    }
     if (s.contains(SeccionInforme.especies)) {
       bl..add(BTitulo(t('Resultados por especie'), 2))
         ..add(_grupos('Especie', agruparNidos(b.nidos, (n) => n.especie)));
     }
+    if (s.contains(SeccionInforme.comunidades)) {
+      bl..add(BTitulo(t('Resultados por comunidad autónoma'), 2))
+        ..add(_grupos('Comunidad autónoma', agruparNidos(b.nidos, (n) => ubicacionDe(n).comunidad)));
+    }
+    if (s.contains(SeccionInforme.provincias)) {
+      bl..add(BTitulo(t('Resultados por provincia'), 2))
+        ..add(_grupos('Provincia', agruparNidos(b.nidos, (n) => ubicacionDe(n).provincia)));
+    }
     if (s.contains(SeccionInforme.municipios)) {
-      bl..add(BTitulo(t('Resultados por municipio'), 2))
-        ..add(_grupos('Municipio', agruparNidos(b.nidos, (n) => n.municipio)));
+      bl..add(BTitulo(t('Resultados por localidad'), 2))
+        ..add(_grupos('Localidad', agruparNidos(b.nidos, (n) => n.municipio)));
     }
     if (s.contains(SeccionInforme.causas)) {
       bl.add(BTitulo(t('Causas de fracaso'), 2));
@@ -443,7 +479,7 @@ class InformeTecnico {
         bl.add(BParrafo('No hay nidos que cumplan los filtros seleccionados.'));
       } else {
         bl.add(BTabla(
-          ['Nº', 'Etiqueta', 'Municipio', 'Especie', 'Incubación', 'Nac.', 'Vol.', 'Muer.', 'Resultado', 'Justificación de conservación'],
+          ['Nº', 'Etiqueta', 'Localidad', 'Especie', 'Incubación', 'Nac.', 'Vol.', 'Muer.', 'Resultado', 'Justificación de conservación'],
           [
             for (final n in orden)
               [
@@ -477,6 +513,28 @@ class InformeTecnico {
     }
     bl.add(BFirma(b.autor, b.cargo));
     return InformeDocumento(b.titulo, b.anio, bl);
+  }
+
+  /// Sección «Mapas de localización»: general y, por nivel, un mapa por grupo.
+  static List<Bloque> _mapas(InformeBorrador b) {
+    final out = <Bloque>[BNota(leyendaMapa)];
+    final general = b.mapas.where((m) => m.nivel == 'general').toList();
+    if (general.isNotEmpty) out.add(BMapas(general, columnas: 1));
+    const titulos = {
+      'comunidad': 'Por comunidad autónoma',
+      'provincia': 'Por provincia',
+      'localidad': 'Por localidad',
+    };
+    titulos.forEach((nivel, titulo) {
+      final l = b.mapas.where((m) => m.nivel == nivel).toList();
+      if (l.isEmpty) return;
+      out..add(BTitulo(titulo, 3))..add(BMapas(l));
+    });
+    final sin = b.nidos.where((n) => !n.tieneCoordenadas).length;
+    if (sin > 0) {
+      out.add(BNota('$sin nido(s) sin coordenadas válidas no aparecen en los mapas.'));
+    }
+    return out;
   }
 
   static BTabla _resumen(List<NidoGrefaModel> nidos) {
@@ -534,7 +592,7 @@ class InformeTecnico {
     return [
       BParrafo('${lista.length} nido(s) con intervención${resumenTipos.isEmpty ? '' : ' - $resumenTipos'}.'),
       BTabla(
-        ['Nido', 'Municipio', 'Tipo de manejo', 'Resultado', 'Observaciones'],
+        ['Nido', 'Localidad', 'Tipo de manejo', 'Resultado', 'Observaciones'],
         [
           for (final n in lista)
             [
@@ -624,6 +682,10 @@ th.n, td.n { text-align: right; }
 .firma { margin-top: 36px; width: 55%; }
 .firma .linea { margin-top: 38px; border-top: 1px solid #333; padding-top: 2px; font-size: 8.5pt; color: #555; }
 .salto { page-break-before: always; }
+table.mapas { width: 100%; table-layout: fixed; }
+table.mapas td { vertical-align: top; padding: 3px; border: 0; }
+table.mapas img { width: 100%; height: auto; border: 1px solid #c9d6cc; }
+.pie { font-size: 8.5pt; color: #444; text-align: center; margin-bottom: 6px; }
 ''';
 
 class InformeRender {
@@ -664,6 +726,23 @@ class InformeRender {
           sb.write('</tbody></table>');
         case BFirma():
           sb.write('<div class="firma"><div>${_h(b.autor)}</div><div>${_h(b.cargo)}</div><div class="linea">Firma y sello</div></div>');
+        case BMapas():
+          sb.write('<table class="mapas">');
+          for (var i = 0; i < b.mapas.length; i += b.columnas) {
+            sb.write('<tr>');
+            for (var k = 0; k < b.columnas; k++) {
+              final j = i + k;
+              if (j >= b.mapas.length) {
+                sb.write('<td></td>');
+                continue;
+              }
+              final m = b.mapas[j];
+              sb.write('<td><img alt="${_h(m.titulo)}" src="data:image/jpeg;base64,${base64Encode(m.bytes)}">'
+                  '<div class="pie">${_h(m.titulo)} · ${m.n} nido(s)</div></td>');
+            }
+            sb.write('</tr>');
+          }
+          sb.write('</table>');
         case BSalto():
           sb.write('<div class="salto"></div>');
       }
@@ -809,6 +888,31 @@ class InformeRender {
               ),
             ]),
           ));
+        case BMapas():
+          final ancho = (PdfPageFormat.a4.width - 72 - 8 * (b.columnas - 1)) / b.columnas;
+          pw.Widget celda(MapaGenerado m) => pw.SizedBox(
+                width: ancho,
+                child: pw.Column(children: [
+                  pw.Image(pw.MemoryImage(m.bytes), width: ancho),
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.only(top: 2, bottom: 6),
+                    child: pw.Text('${m.titulo} · ${m.n} nido(s)',
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+                  ),
+                ]),
+              );
+          for (var i = 0; i < b.mapas.length; i += b.columnas) {
+            w.add(pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                for (var k = 0; k < b.columnas; k++) ...[
+                  if (k > 0) pw.SizedBox(width: 8),
+                  if (i + k < b.mapas.length) celda(b.mapas[i + k]) else pw.SizedBox(width: ancho),
+                ],
+              ],
+            ));
+          }
         case BSalto():
           w.add(pw.NewPage());
       }
