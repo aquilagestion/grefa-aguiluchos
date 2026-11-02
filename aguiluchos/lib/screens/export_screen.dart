@@ -1,17 +1,13 @@
-import 'dart:io';
-import 'dart:typed_data';
-
-import 'package:file_picker/file_picker.dart' show FilePicker;
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../app/app_services.dart';
 import '../models/nido_constants.dart';
 import '../models/nido_filter.dart';
 import '../models/nido_grefa_model.dart';
 import '../services/export_service.dart';
+import 'informe_tecnico_screen.dart';
+import '../widgets/entrega_archivos.dart';
 import '../widgets/responsive.dart';
 
 /// Exportación a Excel y PDF con filtros y selector de columnas a la carta.
@@ -20,21 +16,6 @@ class ExportScreen extends StatefulWidget {
 
   @override
   State<ExportScreen> createState() => _ExportScreenState();
-}
-
-enum _Entrega { compartir, guardar }
-
-class _Archivo {
-  const _Archivo({
-    required this.nombre,
-    required this.mime,
-    required this.ext,
-    required this.bytes,
-  });
-  final String nombre;
-  final String mime;
-  final String ext;
-  final Uint8List bytes;
 }
 
 class _ExportScreenState extends State<ExportScreen> {
@@ -106,11 +87,11 @@ class _ExportScreenState extends State<ExportScreen> {
     }
   }
 
-  Future<_Archivo?> _prepararExcel(List<NidoGrefaModel> nidos) async {
+  Future<ArchivoExportado?> _prepararExcel(List<NidoGrefaModel> nidos) async {
     final bytes = AppServices.of(context)
         .export
         .generarExcel(nidos, _columnasSeleccionadas);
-    return _Archivo(
+    return ArchivoExportado(
       nombre: ExportService.nombreArchivo('nidos_aguiluchos', 'xlsx'),
       mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       ext: 'xlsx',
@@ -118,12 +99,12 @@ class _ExportScreenState extends State<ExportScreen> {
     );
   }
 
-  Future<_Archivo?> _prepararPdf(List<NidoGrefaModel> nidos) async {
+  Future<ArchivoExportado?> _prepararPdf(List<NidoGrefaModel> nidos) async {
     final bytes = await AppServices.of(context).export.generarPdf(
           nidos,
           descripcionFiltros: _descripcionFiltros,
         );
-    return _Archivo(
+    return ArchivoExportado(
       nombre: ExportService.nombreArchivo('informe_aguiluchos', 'pdf'),
       mime: 'application/pdf',
       ext: 'pdf',
@@ -137,6 +118,20 @@ class _ExportScreenState extends State<ExportScreen> {
 
   Future<void> _exportarAmbos() => _generar(excel: true, pdf: true);
 
+  /// Informe técnico completo y editable con los nidos que cumplen los filtros.
+  Future<void> _informeTecnico() async {
+    final nav = Navigator.of(context);
+    final nidos = await AppServices.of(context).db.consultar(_filter);
+    if (nidos.isEmpty) {
+      _snack('No hay nidos que cumplan los filtros.');
+      return;
+    }
+    if (!mounted) return;
+    await nav.push(MaterialPageRoute<void>(
+      builder: (_) => InformeTecnicoScreen(nidos: nidos, filtros: _descripcionFiltros),
+    ));
+  }
+
   Future<void> _generar({required bool excel, required bool pdf}) async {
     if (excel && _columnas.isEmpty) {
       _snack('Selecciona al menos una columna.');
@@ -144,7 +139,7 @@ class _ExportScreenState extends State<ExportScreen> {
     }
     final services = AppServices.of(context);
     setState(() => _busy = true);
-    final archivos = <_Archivo>[];
+    final archivos = <ArchivoExportado>[];
     try {
       final nidos = await services.db.consultar(_filter);
       if (nidos.isEmpty) {
@@ -160,119 +155,7 @@ class _ExportScreenState extends State<ExportScreen> {
       if (mounted) setState(() => _busy = false);
     }
     if (!mounted) return;
-    await _entregar(archivos);
-  }
-
-  /// Pregunta al usuario qué hacer con los informes generados: compartirlos o
-  /// guardarlos eligiendo dónde (carpeta y nombre) para cada uno.
-  Future<void> _entregar(List<_Archivo> archivos) async {
-    final choice = await showModalBottomSheet<_Entrega>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final a in archivos)
-            ListTile(
-              dense: archivos.length > 1,
-              leading: Icon(a.ext == 'pdf'
-                  ? Icons.picture_as_pdf
-                  : Icons.table_chart),
-              title: Text(a.nombre,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text('${(a.bytes.length / 1024).toStringAsFixed(1)} KB'),
-            ),
-          const Divider(height: 1),
-          ListTile(
-            key: const Key('entrega-guardar'),
-            leading: const Icon(Icons.save_alt),
-            title: const Text('Guardar en…'),
-            subtitle: Text(archivos.length > 1
-                ? 'Elegirás carpeta y nombre de cada informe'
-                : 'Elige carpeta y nombre del informe'),
-            onTap: () => Navigator.pop(ctx, _Entrega.guardar),
-          ),
-          ListTile(
-            key: const Key('entrega-compartir'),
-            leading: const Icon(Icons.share),
-            title: const Text('Compartir'),
-            subtitle: const Text('WhatsApp, correo electrónico, Drive…'),
-            onTap: () => Navigator.pop(ctx, _Entrega.compartir),
-          ),
-        ]),
-      ),
-    );
-    if (choice == null || !mounted) return;
-
-    try {
-      if (choice == _Entrega.guardar) {
-        await _guardarEn(archivos);
-      } else {
-        await _compartir(archivos);
-      }
-    } catch (e) {
-      _snack('No se pudo completar la acción: $e');
-    }
-  }
-
-  Future<void> _compartir(List<_Archivo> archivos) async {
-    final export = AppServices.of(context).export;
-    try {
-      final xfiles = <XFile>[];
-      for (final a in archivos) {
-        final f = await export.guardarTemporal(a.bytes, a.nombre);
-        xfiles.add(XFile(f.path, mimeType: a.mime, name: a.nombre));
-      }
-      await SharePlus.instance.share(ShareParams(
-        files: xfiles,
-        subject: 'Aguiluchos GREFA - ${archivos.map((a) => a.nombre).join(', ')}',
-        text: 'Informe de la campaña Aguilucho (GREFA).',
-      ));
-    } on UnimplementedError {
-      _snack('Compartir archivos no está disponible en este sistema; elige dónde guardarlo.');
-      await _guardarEn(archivos);
-    }
-  }
-
-  /// Muestra el selector del sistema para cada informe (carpeta + nombre).
-  Future<void> _guardarEn(List<_Archivo> archivos) async {
-    final guardados = <String>[];
-    for (final a in archivos) {
-      final destino = await _elegirDestino(a);
-      if (destino == null) {
-        // El usuario canceló: no se sigue preguntando por el resto.
-        break;
-      }
-      guardados.add(destino);
-    }
-    if (guardados.isEmpty) {
-      _snack('Guardado cancelado.');
-    } else {
-      _snack(guardados.length == 1
-          ? 'Guardado en ${guardados.first}'
-          : 'Guardados ${guardados.length} informes:\n${guardados.join('\n')}');
-    }
-  }
-
-  /// Devuelve la ruta/URI donde se guardó o `null` si se canceló.
-  Future<String?> _elegirDestino(_Archivo a) async {
-    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-      final loc = await getSaveLocation(
-        suggestedName: a.nombre,
-        acceptedTypeGroups: [
-          XTypeGroup(label: a.ext.toUpperCase(), extensions: [a.ext]),
-        ],
-      );
-      if (loc == null) return null;
-      await File(loc.path).writeAsBytes(a.bytes, flush: true);
-      return loc.path;
-    }
-    // Android / iOS: selector del sistema (Storage Access Framework).
-    final uri = await FilePicker.saveFile(
-      fileName: a.nombre,
-      bytes: a.bytes,
-      mimeType: a.mime,
-      dialogTitle: 'Guardar ${a.nombre}',
-    );
-    return uri == null ? null : (uri.scheme == 'file' ? uri.toFilePath() : a.nombre);
+    await entregarArchivos(context, archivos);
   }
 
   void _snack(String m) {
@@ -434,6 +317,12 @@ class _ExportScreenState extends State<ExportScreen> {
           onPressed: _busy ? null : _exportarAmbos,
           icon: const Icon(Icons.library_books_outlined),
           label: const Text('Excel + PDF'),
+        ),
+        FilledButton.tonalIcon(
+          key: const Key('exportar-informe-tecnico'),
+          onPressed: _busy ? null : _informeTecnico,
+          icon: const Icon(Icons.assignment_outlined),
+          label: const Text('Informe técnico completo'),
         ),
       ]);
 

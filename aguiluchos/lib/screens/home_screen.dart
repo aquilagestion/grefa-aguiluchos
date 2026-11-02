@@ -8,6 +8,8 @@ import '../models/nido_constants.dart';
 import '../models/nido_filter.dart';
 import '../models/nido_grefa_model.dart';
 import '../services/excel_import_service.dart';
+import '../services/location_service.dart';
+import '../utils/geo.dart';
 import '../widgets/nido_card.dart';
 import '../widgets/nidos_map.dart';
 import '../widgets/responsive.dart';
@@ -33,6 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loading = true;
   StreamSubscription<void>? _sub;
   bool _didInit = false;
+  bool _buscandoGps = false;
   final _searchCtrl = TextEditingController();
 
   @override
@@ -81,6 +84,69 @@ class _HomeScreenState extends State<HomeScreen> {
     _cargar();
   }
 
+  /// Crea un nido nuevo a partir de la posición GPS actual: captura la
+  /// posición, avisa si es poco precisa o si ya hay un nido junto a ella y
+  /// abre el formulario con las coordenadas rellenadas.
+  Future<void> _nuevoDesdeGps() async {
+    if (_buscandoGps) return;
+    final services = AppServices.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _buscandoGps = true);
+    messenger.showSnackBar(const SnackBar(
+        content: Text('Obteniendo posición GPS…'),
+        duration: Duration(seconds: 30)));
+    try {
+      final pos = await services.location.posicionActual();
+      final todos = await services.db.consultar(const NidoFilter());
+      messenger.hideCurrentSnackBar();
+      if (!mounted) return;
+
+      final cerca = nidoMasCercano(todos, pos.latitude, pos.longitude);
+      final lineas = <String>[
+        if (pos.accuracy > 25)
+          'La precisión del GPS es baja (±${pos.accuracy.toStringAsFixed(0)} m). '
+              'Conviene esperar unos segundos al aire libre.',
+        if (cerca != null)
+          'Ya existe el nido ${cerca.nido.etiqueta ?? cerca.nido.numeracion ?? ''} '
+              'a ${cerca.metros.toStringAsFixed(0)} m de aquí.',
+      ];
+      if (lineas.isNotEmpty) {
+        final seguir = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(Icons.my_location),
+            title: const Text('Revisa la posición'),
+            content: Text('${lineas.join('\n\n')}\n\n¿Crear el nido en esta posición?'),
+            actions: [
+              TextButton(
+                  key: const Key('gps-cancelar'),
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  key: const Key('gps-crear'),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Crear aquí')),
+            ],
+          ),
+        );
+        if (seguir != true || !mounted) return;
+      }
+      messenger.showSnackBar(SnackBar(
+          content: Text(
+              'Posición GPS capturada (±${pos.accuracy.toStringAsFixed(0)} m).')));
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => NidoDetailScreen(
+            plantilla: nidoDesdePosicion(pos.latitude, pos.longitude)),
+      ));
+      _cargar();
+    } on LocationException catch (e) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _buscandoGps = false);
+    }
+  }
   Future<void> _sincronizar() async {
     final sync = AppServices.of(context).sync;
     final messenger = ScaffoldMessenger.of(context);
@@ -231,10 +297,31 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _abrirNido(null),
-        icon: const Icon(Icons.add),
-        label: const Text('Nuevo Nido'),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.extended(
+            key: const Key('fab-nido-gps'),
+            heroTag: 'fab-nido-gps',
+            onPressed: _buscandoGps ? null : _nuevoDesdeGps,
+            icon: _buscandoGps
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.my_location),
+            label: const Text('Nido en mi posición'),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.extended(
+            key: const Key('fab-nido-nuevo'),
+            heroTag: 'fab-nido-nuevo',
+            onPressed: () => _abrirNido(null),
+            icon: const Icon(Icons.add),
+            label: const Text('Nuevo Nido'),
+          ),
+        ],
       ),
       body: SafeArea(
         child: wide ? _buildWide() : _buildNarrow(),
