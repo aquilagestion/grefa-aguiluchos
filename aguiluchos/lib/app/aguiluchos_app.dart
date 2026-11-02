@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../screens/home_screen.dart';
+import '../screens/login_screen.dart';
+import '../services/auth_service.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
 import '../services/image_storage_service.dart';
@@ -14,6 +16,7 @@ class AguiluchosApp extends StatelessWidget {
     super.key,
     required this.db,
     required this.sync,
+    this.auth,
     this._images,
     this._location,
     this._export,
@@ -21,6 +24,9 @@ class AguiluchosApp extends StatelessWidget {
 
   final DatabaseService db;
   final SyncService sync;
+
+  /// `null`: sin login (tests o app sin Supabase).
+  final AuthService? auth;
   final ImageStorageService? _images;
   final LocationService? _location;
   final ExportService? _export;
@@ -35,6 +41,7 @@ class AguiluchosApp extends StatelessWidget {
       images: _images ?? ImageStorageService(),
       location: _location ?? LocationService(),
       export: _export ?? ExportService(),
+      auth: auth,
       child: MaterialApp(
         title: 'Aguiluchos',
         debugShowCheckedModeBanner: false,
@@ -54,8 +61,27 @@ class AguiluchosApp extends StatelessWidget {
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
-        home: const HomeScreen(),
+        home: _AuthGate(auth: auth),
       ),
+    );
+  }
+}
+
+/// Muestra la pantalla de acceso mientras toque iniciar sesión y la principal
+/// en cuanto haya sesión (o el operario elija trabajar sin conexión).
+class _AuthGate extends StatelessWidget {
+  const _AuthGate({required this.auth});
+
+  final AuthService? auth;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = auth;
+    if (a == null) return const HomeScreen();
+    return ListenableBuilder(
+      listenable: a,
+      builder: (context, _) =>
+          a.needsLoginScreen ? LoginScreen(auth: a) : const HomeScreen(),
     );
   }
 }

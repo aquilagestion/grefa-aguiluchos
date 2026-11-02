@@ -44,11 +44,20 @@ flutter build apk --debug --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_
 2. Abre **SQL Editor**, pega y ejecuta [`supabase/schema.sql`](supabase/schema.sql): crea la tabla
    `nidos_grefa`, el trigger de Last-Write-Wins, el bucket público `nidos-fotos` y las políticas RLS.
 3. Copia `Project URL` y la clave `anon` (Settings → API) a los `--dart-define`.
-4. **Seguridad**: las políticas activas son para el rol `authenticated`. La app todavía **no
-   incluye pantalla de login**, así que para un piloto hay que descomentar el bloque
-   "SOLO PILOTO SIN LOGIN" del SQL (abre lectura/escritura a quien tenga la anon key; no uses
-   datos reales). Lo recomendable es añadir login con Supabase Auth.
-
+4. **Cuentas y acceso** (se comparte con grefa-proyectos: mismo proyecto de Supabase, mismos usuarios):
+   * Administrador único: `aquilagestion@grefa.org` (es el único que puede eliminar nidos).
+   * El resto se registra solo, desde la app o el panel («Crear cuenta»), con un correo
+     `@grefa.org`; confirma el correo con el enlace que recibe y ya puede entrar.
+   * «He olvidado mi contraseña» envía un enlace (abre grefa-proyectos para elegir la nueva) y
+     «Cambiar contraseña» (menú de la app / botón del panel) la cambia con la sesión iniciada.
+   * La sesión se guarda en el dispositivo: solo hace falta internet la primera vez. Sin sesión se
+     puede «Trabajar sin conexión (solo local)» y todo lo guardado se sube al iniciar sesión.
+5. **Aplicar las reglas en la base de datos**: ejecuta una vez
+   [`supabase/activar_acceso_grefa.sql`](supabase/activar_acceso_grefa.sql) en el SQL Editor.
+   Retira el acceso con la clave anónima (que va embebida en la APK y en el JavaScript del panel),
+   limita la lectura y escritura a correos `@grefa.org`, reserva el borrado al administrador y
+   activa Realtime para el panel. `--dart-define=REQUIRE_LOGIN=false` solo sirve para el piloto
+   con políticas anónimas.
 ## Arquitectura
 
 ```
@@ -112,7 +121,9 @@ AGUILUCHOS_XLSX=/ruta/DATOS_FINALES.xlsx flutter test test/excel_import_test.dar
 ### Sincronización y Last-Write-Wins
 
 `SyncService.syncNow()` se dispara al recuperar conexión (`connectivity_plus`), al guardar un
-nido, cada 3 minutos si hay pendientes y desde el botón **Sincronizar ahora**. Ciclo:
+nido, al volver la app a primer plano, **cada minuto** (suba lo pendiente y baje lo que otros
+hayan cambiado en el panel web, aunque no haya cambios locales) y desde el botón **Sincronizar
+ahora**. Requiere sesión iniciada (ver "Configurar Supabase"). Ciclo:
 
 1. **Pull incremental**: descarga filas con `server_updated_at >= cursor` (paginado). El cursor
    se guarda en la tabla local `sync_meta`. Se usa `server_updated_at` (la pone un trigger con
@@ -181,7 +192,7 @@ archivos) se ofrece guardar.
   (los marcadores sí aparecen). Para uso intensivo conviene un proveedor de teselas propio.
 * La captura de GPS no funciona en Linux (sin soporte de `geolocator`); se pueden teclear las
   coordenadas UTM.
-* No hay login de usuarios (ver "Configurar Supabase").
+* La app no gestiona usuarios: se crean en el panel de Supabase (ver "Configurar Supabase").
 * Las fotos eliminadas en la app se quitan de la ficha pero no del bucket de Storage.
 
 ## APK con los datos de la campaña y script de Windows

@@ -213,7 +213,12 @@ class ExcelImportService {
   }
 
   /// Importa a SQLite. Los nidos que ya existen (mismo id) no se sobrescriben.
-  Future<ImportReport> importar(DatabaseService db, Uint8List bytes) async {
+  ///
+  /// [updatedAt] fija la marca de edición de lo importado (por defecto, ahora).
+  /// La carga inicial empaquetada usa [NidoGrefaModel.marcaCargaInicial] para
+  /// no machacar ediciones más recientes que ya existan en Supabase.
+  Future<ImportReport> importar(DatabaseService db, Uint8List bytes,
+      {DateTime? updatedAt}) async {
     final parsed = parse(bytes);
     var nuevos = 0;
     var existentes = 0;
@@ -222,7 +227,7 @@ class ExcelImportService {
         existentes++;
         continue;
       }
-      await db.guardar(n);
+      await db.guardar(n, updatedAt: updatedAt);
       nuevos++;
     }
     return ImportReport(nuevos: nuevos, yaExistentes: existentes, parse: parsed);

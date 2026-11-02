@@ -11,6 +11,12 @@ abstract final class Env {
   static const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY',
       defaultValue: 'TU_SUPABASE_ANON_KEY');
 
+  /// `true` (por defecto): la sincronización exige iniciar sesión con un
+  /// usuario de Supabase Auth. Compilar con `--dart-define=REQUIRE_LOGIN=false`
+  /// solo para el piloto con políticas `anon` (datos personales expuestos).
+  static const requireLogin =
+      bool.fromEnvironment('REQUIRE_LOGIN', defaultValue: true);
+
   static bool get isSupabaseConfigured =>
       isConfigured(supabaseUrl, supabaseAnonKey);
 

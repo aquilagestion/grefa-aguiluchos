@@ -53,6 +53,17 @@ dialog form { display: flex; flex-direction: column; max-height: 94vh; }
 .dlg-cuerpo { padding: 14px 18px; overflow: auto; }
 .dlg-pie { padding: 12px 18px; border-top: 1px solid var(--borde); display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
 .dlg-pie .msg { flex: 1; color: var(--rojo); font-size: 13px; }
+.dlg-vista { display: flex; align-items: center; gap: 6px; padding: 8px 18px; border-bottom: 1px solid var(--borde); font-size: 13px; color: var(--suave); }
+.dlg-vista button { border: 1px solid var(--borde); background: #fff; padding: 4px 12px; border-radius: 999px; cursor: pointer; color: var(--suave); }
+.dlg-vista button.activa { background: var(--verde); border-color: var(--verde); color: #fff; font-weight: 600; }
+.fase-tabs { display: flex; gap: 2px; padding: 6px 18px 0; border-bottom: 1px solid var(--borde); overflow-x: auto; }
+.fase-tabs[hidden] { display: none; }
+.fase-tabs button { border: 0; background: transparent; padding: 8px 12px; cursor: pointer; color: var(--suave); border-bottom: 3px solid transparent; white-space: nowrap; font-size: 13px; }
+.fase-tabs button.activa { color: var(--verde-osc); border-bottom-color: var(--verde); font-weight: 700; }
+.dlg-cuerpo.modo-fases fieldset { display: none; }
+.dlg-cuerpo.modo-fases fieldset.activa { display: block; }
+.dlg-cuerpo.modo-fases fieldset > legend { display: none; }
+#mapa-info { margin-bottom: 6px; }
 fieldset { border: 1px solid var(--borde); border-radius: 10px; margin: 0 0 14px; padding: 10px 12px 12px; }
 legend { font-weight: 700; color: var(--verde-osc); padding: 0 6px; }
 .campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px 14px; }
@@ -65,3 +76,18 @@ legend { font-weight: 700; color: var(--verde-osc); padding: 0 6px; }
 .login h1 { margin: 0 0 4px; color: var(--verde-osc); font-size: 20px; } .login p { color: var(--suave); margin-top: 0; }
 .login input { width: 100%; padding: 9px; margin: 6px 0; border: 1px solid var(--borde); border-radius: 8px; }
 .login .btn { width: 100%; margin-top: 8px; }
+
+header.top .en-vivo { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.15); }
+header.top .en-vivo.ok { background: #fff; color: var(--verde-osc); font-weight: 600; }
+header.top .en-vivo.caido { background: #fdebd0; color: #9a5b00; }
+
+/* Informes técnicos editables */
+.informe-dlg { width: min(1100px, 98vw); height: 94vh; }
+.informe-dlg .inf-config { max-height: 94vh; }
+.inf-editor { display: flex; flex-direction: column; height: 94vh; }
+.inf-barra { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; padding: 8px 18px; border-bottom: 1px solid var(--borde); background: #f4f7f5; }
+.inf-barra .grupo { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.inf-ayuda { font-size: 12px; color: var(--suave); padding: 4px 18px; }
+#inf-frame { flex: 1; width: 100%; border: 0; background: #e6eae7; min-height: 0; }
+.msg.ok { color: var(--verde-osc); }
+@media print { .inf-barra, .inf-ayuda { display: none !important; } }

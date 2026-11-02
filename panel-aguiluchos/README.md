@@ -29,9 +29,11 @@ La anon key es pública por diseño (va en el JavaScript del navegador); **nunca
 
 ## Acceso
 
-* `VITE_REQUIRE_LOGIN=true` (recomendado): el panel pide correo y contraseña. Crea los usuarios en
-  Supabase → Authentication → Users → *Add user* (marca "Auto Confirm User"). Las políticas RLS de
-  `authenticated` están en `aguiluchos/supabase/schema.sql`.
+* `VITE_REQUIRE_LOGIN=true` (recomendado): el panel pide correo y contraseña. Los usuarios son los
+  de grefa-proyectos (mismo proyecto de Supabase). El administrador único es
+  `aquilagestion@grefa.org` (el único que ve el botón «Eliminar»); el resto se registra con «Crear
+  cuenta» usando un correo `@grefa.org`. Incluye «He olvidado mi contraseña» y «Cambiar
+  contraseña». Las reglas en la base de datos están en `aguiluchos/supabase/activar_acceso_grefa.sql`.
 * `VITE_REQUIRE_LOGIN=false`: sin login, solo para el piloto (necesita las políticas `anon` de
   `aguiluchos/supabase/piloto_anon.sql`; los datos personales quedarían públicos).
 
@@ -39,10 +41,14 @@ La anon key es pública por diseño (va en el JavaScript del navegador); **nunca
 
 Cada edición envía `updated_at = now()`. Un trigger de Postgres aplica Last-Write-Wins: si otra persona
 guardó antes una versión más reciente, el servidor conserva la suya y el panel te avisa. Eliminar marca
-`is_deleted = true` (la app lo recoge en su siguiente sincronización). El panel se refresca solo cada 90 s.
+`is_deleted = true` (la app lo recoge en su siguiente sincronización).
+
+**Tiempo real:** el panel se suscribe a Supabase Realtime (`postgres_changes` sobre `nidos_grefa`):
+lo que la app de campo sube al sincronizar aparece al instante (indicador «● En vivo» en la cabecera),
+sin recargar. Requiere ejecutar una vez `aguiluchos/supabase/activar_acceso_grefa.sql`. Si Realtime no está
+disponible, el panel lo indica y relee los datos cada 90 s.
 
 ## Limitaciones
 
 * No sube ni muestra fotos (`imagenes_urls`) todavía.
-* Sin tiempo real (Realtime): se actualiza por sondeo.
 * Exportación solo CSV; para PDF/Excel con formato usa la app.

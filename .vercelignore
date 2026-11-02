@@ -1,0 +1,5 @@
+aguiluchos
+**/node_modules
+**/.dart_tool
+**/build
+*.apk

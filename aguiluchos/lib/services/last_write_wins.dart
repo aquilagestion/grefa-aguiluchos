@@ -34,6 +34,10 @@ abstract final class LastWriteWins {
   }) {
     if (local == null) return LwwDecision.takeRemote;
     final remoteNewer = remote.updatedAt.isAfter(local.updatedAt);
+    // Carga inicial sin editar: no hay edición local que proteger.
+    if (local.esCargaInicialSinEditar && remoteNewer) {
+      return LwwDecision.takeRemote;
+    }
     if (local.isSynced) {
       return remoteNewer ? LwwDecision.takeRemote : LwwDecision.keepLocal;
     }

@@ -107,9 +107,10 @@ CREATE TABLE $nidosTable (
 
   /// Inserta o actualiza un nido. Siempre marca `isSynced=false`, refresca
   /// `updatedAt` y limpia `hasConflict` (el usuario ya lo ha revisado).
-  Future<NidoGrefaModel> guardar(NidoGrefaModel nido) async {
+  Future<NidoGrefaModel> guardar(NidoGrefaModel nido,
+      {DateTime? updatedAt}) async {
     nido
-      ..updatedAt = _clock().toUtc()
+      ..updatedAt = (updatedAt ?? _clock()).toUtc()
       ..isSynced = false
       ..hasConflict = false;
     await _database.insert(nidosTable, nido.toMap(),

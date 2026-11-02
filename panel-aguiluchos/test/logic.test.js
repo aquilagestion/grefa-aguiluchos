@@ -1,7 +1,7 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 import { utmToLatLon, esPlausible, husoParaEste } from '../src/utm.js';
-import { aCsv, estadoReproductivo, filtrar, parseValor, posicion, resumen, validar } from '../src/logic.js';
+import { correoPermitido, esAdmin, validarClave, aCsv, aplicarCambio, estadoReproductivo, filtrar, parseValor, posicion, resumen, validar } from '../src/logic.js';
 import { COLUMNAS, FASES } from '../src/columns.js';
 
 const cerca = (a, b, tol) => assert.ok(Math.abs(a - b) < tol, `${a} !~ ${b}`);
@@ -57,4 +57,38 @@ test('parseValor y CSV', () => {
   assert.ok(csv.startsWith('\ufeff'));
   assert.ok(csv.includes('"A;""B"""'));
   assert.ok(csv.includes('Dron; Rodal'));
+});
+
+test('tiempo real: aplicarCambio inserta, actualiza, respeta LWW y borra', () => {
+  const a = { id: 'a', etiqueta: 'A', updated_at: '2026-11-02T10:00:00+00:00' };
+  let l = aplicarCambio([a], { eventType: 'INSERT', new: { id: 'b', etiqueta: 'B', updated_at: '2026-11-02T10:01:00+00:00', tipo_acciones_manejo: '{Dron,Rodal}' } });
+  assert.equal(l.length, 2);
+  assert.deepEqual(l[1].tipo_acciones_manejo, ['Dron', 'Rodal']);
+  // Actualización más reciente: se aplica.
+  l = aplicarCambio(l, { eventType: 'UPDATE', new: { id: 'a', etiqueta: 'A2', updated_at: '2026-11-02T11:00:00+00:00' } });
+  assert.equal(l.find((n) => n.id === 'a').etiqueta, 'A2');
+  // Evento desordenado más antiguo: se ignora (Last-Write-Wins).
+  const igual = aplicarCambio(l, { eventType: 'UPDATE', new: { id: 'a', etiqueta: 'VIEJO', updated_at: '2026-11-02T09:00:00+00:00' } });
+  assert.equal(igual.find((n) => n.id === 'a').etiqueta, 'A2');
+  // Borrado lógico y DELETE físico quitan el nido.
+  l = aplicarCambio(l, { eventType: 'UPDATE', new: { id: 'b', is_deleted: true, updated_at: '2026-11-02T12:00:00+00:00' } });
+  assert.deepEqual(l.map((n) => n.id), ['a']);
+  l = aplicarCambio(l, { eventType: 'DELETE', old: { id: 'a' }, new: {} });
+  assert.equal(l.length, 0);
+  // Evento sin fila: no hace nada.
+  assert.equal(aplicarCambio(l, { eventType: 'UPDATE', new: {} }), l);
+});
+
+
+test('cuentas: solo @grefa.org, un único administrador y clave mínima', () => {
+  assert.equal(correoPermitido('ana@grefa.org'), true);
+  assert.equal(correoPermitido(' Ana.Lopez@GREFA.ORG '), true);
+  for (const mal of ['ana@gmail.com', 'ana@gref.org', 'ana@grefa.org.evil.com', 'x@evil.com@grefa.org', '@grefa.org', '', null]) {
+    assert.equal(correoPermitido(mal), false, String(mal));
+  }
+  assert.equal(esAdmin('AquilaGestion@grefa.org'), true);
+  assert.equal(esAdmin('ana@grefa.org'), false);
+  assert.equal(esAdmin(undefined), false);
+  assert.equal(validarClave('corta'), 'La contraseña debe tener al menos 8 caracteres.');
+  assert.equal(validarClave('suficiente1'), null);
 });

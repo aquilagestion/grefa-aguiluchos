@@ -700,7 +700,7 @@ class _NidoDetailScreenState extends State<NidoDetailScreen>
                   ? 'Nido'
                   : _nido.etiqueta!),
           actions: [
-            if (!_esNuevo)
+            if (!_esNuevo && (AppServices.of(context).auth?.canDelete ?? true))
               IconButton(
                 tooltip: 'Borrar nido',
                 onPressed: _borrar,

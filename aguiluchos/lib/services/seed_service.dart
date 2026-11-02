@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../models/nido_grefa_model.dart';
 import 'database_service.dart';
 import 'excel_import_service.dart';
 
@@ -31,7 +32,8 @@ class SeedService {
         data.offsetInBytes,
         data.lengthInBytes,
       );
-      final report = await ExcelImportService().importar(db, bytes);
+      final report = await ExcelImportService()
+          .importar(db, bytes, updatedAt: NidoGrefaModel.marcaCargaInicial);
       await db.escribirMeta(metaKey, DateTime.now().toUtc().toIso8601String());
       debugPrint('Datos iniciales: ${report.nuevos} nidos importados.');
       return report;

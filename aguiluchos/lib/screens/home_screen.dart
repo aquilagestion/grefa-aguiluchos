@@ -13,6 +13,7 @@ import '../widgets/nidos_map.dart';
 import '../widgets/responsive.dart';
 import '../widgets/sync_status_icon.dart';
 import 'export_screen.dart';
+import 'login_screen.dart';
 import 'nido_detail_screen.dart';
 
 enum _Vista { lista, mapa }
@@ -93,6 +94,29 @@ class _HomeScreenState extends State<HomeScreen> {
     messenger.showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  Future<void> _cerrarSesion() async {
+    final auth = AppServices.of(context).auth;
+    if (auth == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Cerrar sesión?'),
+        content: const Text(
+            'Los datos de este dispositivo se conservan. Lo pendiente se '
+            'subirá cuando vuelvas a iniciar sesión.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Cerrar sesión')),
+        ],
+      ),
+    );
+    if (ok == true) await auth.signOut();
+  }
+
   Future<void> _importarExcel() async {
     final services = AppServices.of(context);
     final messenger = ScaffoldMessenger.of(context);
@@ -155,17 +179,55 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: 'Más opciones',
             onSelected: (v) {
               if (v == 'importar') _importarExcel();
+              if (v == 'entrar') services.auth?.requestLogin();
+              if (v == 'clave' && services.auth != null) {
+                mostrarCambiarClave(context, services.auth!);
+              }
+              if (v == 'salir') _cerrarSesion();
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'importar',
-                child: ListTile(
-                  leading: Icon(Icons.upload_file),
-                  title: Text('Importar desde Excel (.xlsx)'),
-                  contentPadding: EdgeInsets.zero,
+            itemBuilder: (_) {
+              final auth = services.auth;
+              return [
+                const PopupMenuItem(
+                  value: 'importar',
+                  child: ListTile(
+                    leading: Icon(Icons.upload_file),
+                    title: Text('Importar desde Excel (.xlsx)'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
-              ),
-            ],
+                if (auth != null && auth.requiresLogin && !auth.isSignedIn)
+                  const PopupMenuItem(
+                    value: 'entrar',
+                    child: ListTile(
+                      leading: Icon(Icons.login),
+                      title: Text('Iniciar sesión'),
+                      subtitle: Text('Para sincronizar con la oficina'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                if (auth != null && auth.isSignedIn)
+                  const PopupMenuItem(
+                    value: 'clave',
+                    child: ListTile(
+                      leading: Icon(Icons.lock_reset),
+                      title: Text('Cambiar contraseña'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                if (auth != null && auth.isSignedIn)
+                  PopupMenuItem(
+                    value: 'salir',
+                    child: ListTile(
+                      leading: const Icon(Icons.logout),
+                      title: const Text('Cerrar sesión'),
+                      subtitle: Text(
+                          '${auth.email ?? ''}${auth.isAdmin ? ' · administrador' : ''}'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+              ];
+            },
           ),
         ],
       ),

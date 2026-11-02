@@ -104,3 +104,63 @@ export function validar(n) {
   }
   return errores;
 }
+
+/** Convierte arrays que Realtime pudiera entregar como texto Postgres ("{a,b}"). */
+function listaPg(v) {
+  if (Array.isArray(v)) return v;
+  if (typeof v !== 'string') return [];
+  const s = v.trim();
+  if (s === '' || s === '{}') return [];
+  if (s.startsWith('[')) {
+    try { return JSON.parse(s); } catch { return []; }
+  }
+  return s.replace(/^\{|\}$/g, '').split(',').map((x) => x.replace(/^"|"$/g, '').trim()).filter(Boolean);
+}
+
+/**
+ * Aplica a la lista en memoria un evento de Supabase Realtime (`postgres_changes`).
+ * - Borrado lógico (`is_deleted`) o DELETE: el nido desaparece de la lista.
+ * - Last-Write-Wins: un evento con `updated_at` anterior al que ya se tiene se ignora.
+ * Devuelve una lista nueva (o la misma si no hay cambios).
+ */
+export function aplicarCambio(nidos, evento) {
+  if (evento.eventType === 'DELETE') {
+    const id = evento.old?.id;
+    return id ? nidos.filter((n) => n.id !== id) : nidos;
+  }
+  const nueva = evento.new;
+  if (!nueva?.id) return nidos;
+  if (nueva.is_deleted) return nidos.filter((n) => n.id !== nueva.id);
+  const fila = {
+    ...nueva,
+    tipo_acciones_manejo: listaPg(nueva.tipo_acciones_manejo),
+    imagenes_urls: listaPg(nueva.imagenes_urls),
+  };
+  const i = nidos.findIndex((n) => n.id === fila.id);
+  if (i < 0) return [...nidos, fila];
+  const actual = nidos[i];
+  if (actual.updated_at && fila.updated_at && new Date(fila.updated_at) < new Date(actual.updated_at)) return nidos;
+  const copia = [...nidos];
+  copia[i] = fila;
+  return copia;
+}
+
+// ── Cuentas ─────────────────────────────────────────────────────────────────
+export const DOMINIO = '@grefa.org';
+export const ADMIN_EMAIL = 'aquilagestion@grefa.org';
+export const MIN_CLAVE = 8;
+
+/** Correo del dominio de GREFA (nombre@grefa.org). */
+export function correoPermitido(email) {
+  const e = String(email ?? '').trim().toLowerCase();
+  return e.length > DOMINIO.length && e.endsWith(DOMINIO) && !/\s/.test(e) && e.indexOf('@') === e.length - DOMINIO.length;
+}
+
+/** Único administrador de la campaña (el único que puede eliminar nidos). */
+export function esAdmin(email) {
+  return String(email ?? '').trim().toLowerCase() === ADMIN_EMAIL;
+}
+
+export function validarClave(clave) {
+  return String(clave ?? '').length >= MIN_CLAVE ? null : `La contraseña debe tener al menos ${MIN_CLAVE} caracteres.`;
+}

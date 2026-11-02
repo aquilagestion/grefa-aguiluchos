@@ -2,9 +2,16 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 
-import { configurado, exigeLogin, supabase, cargarNidos, guardarNido, borrarNido } from './api.js';
+import {
+  configurado, exigeLogin, supabase, cargarNidos, guardarNido, borrarNido, suscribirCambios,
+  registrar, recuperarClave, cambiarClave,
+} from './api.js';
 import { COLUMNAS, FASES, ESPECIES, PROYECTOS } from './columns.js';
-import { aCsv, estadoReproductivo, filtrar, googleMapsUrl, parseValor, posicion, resumen, validar } from './logic.js';
+import { abrirInformesUI } from './informe_ui.js';
+import {
+  aCsv, aplicarCambio, estadoReproductivo, filtrar, googleMapsUrl, parseValor, posicion, resumen, validar,
+  correoPermitido, esAdmin, validarClave, DOMINIO, MIN_CLAVE,
+} from './logic.js';
 
 const app = document.getElementById('app');
 const estado = {
@@ -18,6 +25,11 @@ const estado = {
   mapa: null,
   capa: null,
   intervalo: null,
+  // Tiempo real (Supabase Realtime): 'conectando' | 'SUBSCRIBED' | otro = caído.
+  vivo: 'conectando',
+  cancelarVivo: null,
+  pintado: null,
+  ciclos: 0,
 };
 
 const esc = (v) =>
@@ -48,30 +60,150 @@ async function iniciar() {
 
 async function arrancarPanel() {
   clearInterval(estado.intervalo);
+  estado.cancelarVivo?.();
+  estado.cancelarVivo = null;
   if (exigeLogin && !estado.sesion) return pintarLogin();
   pintarPanel();
   await recargar();
-  estado.intervalo = setInterval(() => !document.querySelector('dialog[open]') && recargar(), 90_000);
+  iniciarTiempoReal();
+  // Red de seguridad: sin tiempo real se relee cada 90 s; con él, cada 6 min
+  // (por si se perdió algún evento durante una reconexión).
+  estado.ciclos = 0;
+  estado.intervalo = setInterval(() => {
+    if (document.querySelector('dialog[open]')) return;
+    estado.ciclos += 1;
+    if (estado.vivo !== 'SUBSCRIBED' || estado.ciclos % 4 === 0) recargar();
+  }, 90_000);
+}
+
+// ── Tiempo real ─────────────────────────────────────────────────────────────
+function iniciarTiempoReal() {
+  estado.vivo = 'conectando';
+  pintarIndicadorVivo();
+  estado.cancelarVivo = suscribirCambios({
+    onEvento: (ev) => {
+      estado.nidos = aplicarCambio(estado.nidos, ev);
+      // Agrupa ráfagas (p. ej. una sincronización de la app con muchos nidos).
+      clearTimeout(estado.pintado);
+      estado.pintado = setTimeout(() => {
+        actualizarCabecera();
+        pintarContenido();
+      }, 200);
+    },
+    onEstado: (s) => {
+      const recuperado = s === 'SUBSCRIBED' && estado.vivo !== 'conectando' && estado.vivo !== 'SUBSCRIBED';
+      estado.vivo = s;
+      pintarIndicadorVivo();
+      // Tras una caída puede haberse perdido algo: se relee una vez.
+      if (recuperado) recargar();
+    },
+  });
+}
+
+function pintarIndicadorVivo() {
+  const el = document.getElementById('en-vivo');
+  if (!el) return;
+  const ok = estado.vivo === 'SUBSCRIBED';
+  el.className = `en-vivo ${ok ? 'ok' : estado.vivo === 'conectando' ? 'espera' : 'caido'}`;
+  el.textContent = ok ? '● En vivo' : estado.vivo === 'conectando' ? '○ Conectando…' : '○ Sin tiempo real (se actualiza cada 90 s)';
+  el.title = ok
+    ? 'Los cambios de la app de campo aparecen al instante'
+    : 'Realtime no está disponible: el panel relee los datos periódicamente';
 }
 
 // ── Login ───────────────────────────────────────────────────────────────────
-function pintarLogin(mensaje = '') {
+/** modo: 'entrar' | 'registro' | 'recuperar'. `aviso` (verde) y `mensaje` (rojo) son opcionales. */
+function pintarLogin(mensaje = '', modo = 'entrar', aviso = '') {
+  const titulos = {
+    entrar: 'Inicia sesión con tu usuario del panel.',
+    registro: `Crea tu cuenta con tu correo ${DOMINIO}.`,
+    recuperar: 'Te enviaremos un enlace para elegir una contraseña nueva.',
+  };
+  const boton = { entrar: 'Entrar', registro: 'Crear cuenta', recuperar: 'Enviar enlace' }[modo];
   app.innerHTML = `
     <form class="login" id="form-login">
       <h1>GREFA · Campaña Aguilucho</h1>
-      <p>Inicia sesión con tu usuario del panel.</p>
-      <input type="email" name="email" placeholder="Correo electrónico" autocomplete="username" required />
-      <input type="password" name="password" placeholder="Contraseña" autocomplete="current-password" required />
-      <button class="btn primario" type="submit">Entrar</button>
+      <p>${titulos[modo]}</p>
+      ${modo === 'registro' ? '<input type="text" name="nombre" placeholder="Nombre completo" autocomplete="name" required />' : ''}
+      <input type="email" name="email" placeholder="${modo === 'registro' ? `nombre${DOMINIO}` : 'Correo electrónico'}" autocomplete="username" required />
+      ${modo !== 'recuperar' ? `<input type="password" name="password" placeholder="Contraseña${modo === 'registro' ? ` (mínimo ${MIN_CLAVE})` : ''}" autocomplete="${modo === 'registro' ? 'new-password' : 'current-password'}" required />` : ''}
+      ${modo === 'registro' ? '<input type="password" name="password2" placeholder="Repite la contraseña" autocomplete="new-password" required />' : ''}
+      <button class="btn primario" type="submit">${boton}</button>
+      ${modo === 'entrar' ? `
+        <button class="btn" type="button" data-modo="recuperar">He olvidado mi contraseña</button>
+        <button class="btn" type="button" data-modo="registro">Crear cuenta (${DOMINIO})</button>` : '<button class="btn" type="button" data-modo="entrar">Volver a iniciar sesión</button>'}
       <p class="info" style="color:var(--rojo)">${esc(mensaje)}</p>
+      <p class="info" style="color:var(--verde)">${esc(aviso)}</p>
     </form>`;
+  document.querySelectorAll('[data-modo]').forEach((b) => (b.onclick = () => pintarLogin('', b.dataset.modo)));
   document.getElementById('form-login').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const { error } = await supabase.auth.signInWithPassword({ email: f.get('email'), password: f.get('password') });
-    if (error) pintarLogin('Correo o contraseña incorrectos.');
+    const email = String(f.get('email') ?? '');
+    const clave = String(f.get('password') ?? '');
+    const boton = ev.target.querySelector('button[type=submit]');
+    try {
+      if (modo === 'registro') {
+        if (!correoPermitido(email)) return pintarLogin(`Solo se admiten correos ${DOMINIO}.`, modo);
+        const errClave = validarClave(clave);
+        if (errClave) return pintarLogin(errClave, modo);
+        if (clave !== f.get('password2')) return pintarLogin('Las contraseñas no coinciden.', modo);
+        boton.disabled = true;
+        const conSesion = await registrar({ nombre: String(f.get('nombre')), email, clave });
+        if (!conSesion) {
+          pintarLogin('', 'entrar', 'Cuenta creada. Te hemos enviado un correo: abre el enlace para confirmarla y después inicia sesión aquí.');
+        }
+      } else if (modo === 'recuperar') {
+        boton.disabled = true;
+        await recuperarClave(email);
+        pintarLogin('', 'entrar', 'Si el correo tiene cuenta, te hemos enviado un enlace para elegir una contraseña nueva. Revisa también el spam.');
+      } else {
+        boton.disabled = true;
+        const { error } = await supabase.auth.signInWithPassword({ email, password: clave });
+        if (error) pintarLogin(/confirm/i.test(error.message) ? 'El correo todavía no está confirmado. Abre el enlace que te enviamos.' : 'Correo o contraseña incorrectos.', modo);
+      }
+    } catch (e) {
+      pintarLogin(e.message ?? String(e), modo);
+    }
   });
 }
+
+function abrirCambioClave() {
+  const dlg = document.getElementById('dlg');
+  dlg.innerHTML = `<form method="dialog" id="form-clave" style="padding:20px;min-width:300px">
+    <h2>Cambiar contraseña</h2>
+    <div class="campo"><label for="clave-nueva">Contraseña nueva (mínimo ${MIN_CLAVE})</label><input type="password" id="clave-nueva" autocomplete="new-password" required /></div>
+    <div class="campo"><label for="clave-repite">Repite la contraseña</label><input type="password" id="clave-repite" autocomplete="new-password" required /></div>
+    <p class="info" id="clave-msg" style="color:var(--rojo)"></p>
+    <div class="dlg-pie"><button type="button" class="btn" id="clave-cancelar">Cancelar</button>
+      <button type="submit" class="btn primario" id="clave-guardar">Cambiar</button></div></form>`;
+  const msg = (t, ok = false) => {
+    const el = document.getElementById('clave-msg');
+    el.style.color = ok ? 'var(--verde)' : 'var(--rojo)';
+    el.textContent = t;
+  };
+  document.getElementById('clave-cancelar').onclick = () => dlg.close();
+  document.getElementById('form-clave').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const nueva = document.getElementById('clave-nueva').value;
+    const err = validarClave(nueva);
+    if (err) return msg(err);
+    if (nueva !== document.getElementById('clave-repite').value) return msg('Las contraseñas no coinciden.');
+    document.getElementById('clave-guardar').disabled = true;
+    try {
+      await cambiarClave(nueva);
+      msg('Contraseña cambiada correctamente.', true);
+      setTimeout(() => dlg.close(), 1200);
+    } catch (e) {
+      msg(e.message ?? String(e));
+      document.getElementById('clave-guardar').disabled = false;
+    }
+  };
+  dlg.showModal();
+}
+
+/** El panel sin login (piloto) no distingue usuarios; con login solo el administrador elimina. */
+const puedeEliminar = () => !exigeLogin || esAdmin(estado.sesion?.user?.email);
 
 // ── Datos ───────────────────────────────────────────────────────────────────
 async function recargar() {
@@ -110,10 +242,13 @@ function pintarPanel() {
       <h1>GREFA · Campaña Aguilucho</h1>
       <span class="usuario" id="usuario"></span>
       <span class="usuario" id="estado-carga"></span>
+      <span class="en-vivo espera" id="en-vivo"></span>
       <button class="btn" id="btn-recargar" title="Volver a leer los datos">Actualizar</button>
+      <button class="btn" id="btn-mapa" title="Ver todos los nidos en el mapa; al pinchar uno se abre su tarjeta">Mapa de nidos</button>
       <button class="btn" id="btn-csv">Exportar CSV</button>
+      <button class="btn" id="btn-informes" title="Emitir informes técnicos editables (PDF / Word)">Informes</button>
       <button class="btn primario" id="btn-nuevo">+ Nuevo nido</button>
-      ${exigeLogin ? '<button class="btn" id="btn-salir">Salir</button>' : ''}
+      ${exigeLogin ? '<button class="btn" id="btn-clave">Cambiar contraseña</button><button class="btn" id="btn-salir">Salir</button>' : ''}
     </header>
     <main>
       <div id="aviso"></div>
@@ -128,23 +263,36 @@ function pintarPanel() {
         <aside class="tarjeta causas" id="causas"></aside>
       </div>
     </main>
-    <dialog id="dlg"></dialog>`;
+    <dialog id="dlg"></dialog>
+    <dialog id="dlg-informe" class="informe-dlg"></dialog>`;
 
   document.getElementById('btn-recargar').onclick = recargar;
   document.getElementById('btn-csv').onclick = exportarCsv;
+  document.getElementById('btn-informes').onclick = () => abrirInformes();
+  document.getElementById('btn-mapa').onclick = () => {
+    estado.vista = 'mapa';
+    pintarContenido();
+    document.getElementById('contenido')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   document.getElementById('btn-nuevo').onclick = () => abrirFicha(null);
   const salir = document.getElementById('btn-salir');
   if (salir) salir.onclick = () => supabase.auth.signOut();
+  const clave = document.getElementById('btn-clave');
+  if (clave) clave.onclick = abrirCambioClave;
   document.getElementById('tabs').onclick = (ev) => {
     const v = ev.target.dataset?.vista;
     if (v) { estado.vista = v; pintarContenido(); }
   };
   actualizarCabecera();
+  pintarIndicadorVivo();
 }
 
 function actualizarCabecera() {
   const u = document.getElementById('usuario');
-  if (u) u.textContent = estado.sesion?.user?.email ?? (exigeLogin ? '' : 'Acceso sin login (piloto)');
+  if (u) {
+    const mail = estado.sesion?.user?.email;
+    u.textContent = mail ? `${mail}${esAdmin(mail) ? ' · administrador' : ''}` : (exigeLogin ? '' : 'Acceso sin login (piloto)');
+  }
   const c = document.getElementById('estado-carga');
   if (c) c.textContent = estado.cargando ? 'Cargando…' : `${estado.nidos.length} nidos`;
 }
@@ -253,13 +401,14 @@ function pintarTabla(lista) {
 
 function destruirMapa() {
   if (estado.mapa) { estado.mapa.remove(); estado.mapa = null; }
+  estado.huellaMapa = '';
 }
 
 function pintarMapa(lista) {
   const cont = document.getElementById('contenido');
   if (!document.getElementById('mapa')) {
     destruirMapa();
-    cont.innerHTML = '<div id="mapa"></div>';
+    cont.innerHTML = '<div class="info" id="mapa-info"></div><div id="mapa"></div>';
   }
   if (!estado.mapa) {
     estado.mapa = L.map('mapa').setView([40.4, -4.0], 6);
@@ -268,11 +417,6 @@ function pintarMapa(lista) {
       attribution: '© OpenStreetMap',
     }).addTo(estado.mapa);
     estado.capa = L.layerGroup().addTo(estado.mapa);
-    estado.mapa.on('popupopen', (ev) => {
-      ev.popup.getElement()?.querySelector('[data-editar]')?.addEventListener('click', (e) => {
-        abrirFicha(estado.nidos.find((n) => n.id === e.target.dataset.editar));
-      });
-    });
   }
   estado.capa.clearLayers();
   const puntos = [];
@@ -280,16 +424,24 @@ function pintarMapa(lista) {
     const p = posicion(n);
     if (!p) continue;
     const e = estadoReproductivo(n);
-    const gm = googleMapsUrl(n);
-    L.circleMarker([p.lat, p.lon], { radius: 8, color: '#fff', weight: 2, fillColor: COLOR[e], fillOpacity: 0.95 })
-      .bindPopup(`<b>${esc(n.etiqueta || n.numeracion)}</b><br>${esc(n.municipio)} · ${esc(n.especie)}<br>
-        <span class="chip ${claseEstado(e)}">${e}</span><br>
-        ${gm ? `<a href="${esc(gm)}" target="_blank" rel="noopener">Abrir en Google Maps</a><br>` : ''}
-        <a href="#" data-editar="${esc(n.id)}" onclick="return false">Ver ficha</a>`)
+    // Al pinchar un nido se abre directamente su tarjeta completa (ficha).
+    L.circleMarker([p.lat, p.lon], { radius: 9, color: '#fff', weight: 2, fillColor: COLOR[e], fillOpacity: 0.95 })
+      .bindTooltip(`<b>${esc(n.etiqueta || n.numeracion || 'Nido')}</b><br>${esc(n.municipio)} · ${esc(n.especie)} · ${e}`, { direction: 'top' })
+      .on('click', () => abrirFicha(estado.nidos.find((x) => x.id === n.id)))
       .addTo(estado.capa);
     puntos.push([p.lat, p.lon]);
   }
-  if (puntos.length) estado.mapa.fitBounds(puntos, { padding: [30, 30], maxZoom: 12 });
+  const info = document.getElementById('mapa-info');
+  if (info) {
+    const sin = lista.length - puntos.length;
+    info.textContent = `${puntos.length} nidos ubicados en el mapa${sin > 0 ? ` · ${sin} sin coordenadas` : ''}. Pincha en uno para abrir su tarjeta completa.`;
+  }
+  // Solo se reencuadra cuando cambia el conjunto de puntos (no en cada refresco en vivo).
+  const huella = puntos.length ? `${puntos.length}|${lista.map((n) => n.id).join(',')}` : '';
+  if (puntos.length && huella !== estado.huellaMapa) {
+    estado.huellaMapa = huella;
+    estado.mapa.fitBounds(puntos, { padding: [30, 30], maxZoom: 12 });
+  }
   setTimeout(() => estado.mapa?.invalidateSize(), 50);
 }
 
@@ -342,6 +494,14 @@ function leerFormulario(base) {
   return n;
 }
 
+const CLAVE_MODO_FICHA = 'aguiluchos.fichaModo';
+function leerModoFicha() {
+  try { return localStorage.getItem(CLAVE_MODO_FICHA) === 'fases' ? 'fases' : 'completa'; } catch { return 'completa'; }
+}
+function guardarModoFicha(m) {
+  try { localStorage.setItem(CLAVE_MODO_FICHA, m); } catch { /* almacenamiento no disponible */ }
+}
+
 function abrirFicha(nido) {
   const esNuevo = !nido;
   const base = nido ?? { id: crypto.randomUUID(), intervencion: false, vuelan_pollos: false, tipo_acciones_manejo: [] };
@@ -350,8 +510,16 @@ function abrirFicha(nido) {
   dlg.innerHTML = `<form method="dialog" id="form-ficha">
     <div class="dlg-cab"><h2>${esNuevo ? 'Nuevo nido' : `Nido ${esc(base.etiqueta || base.numeracion || '')}`}</h2>
       <button type="button" class="btn" id="dlg-cerrar">Cerrar</button></div>
-    <div class="dlg-cuerpo">
-      ${FASES.map((f) => `<fieldset><legend>${f.titulo}</legend><div class="campos">
+    <div class="dlg-vista" id="dlg-vista">
+      <span>Presentación:</span>
+      <button type="button" data-modo="completa">Completa</button>
+      <button type="button" data-modo="fases">Por fases</button>
+    </div>
+    <div class="fase-tabs" id="fase-tabs">
+      ${FASES.map((f) => `<button type="button" data-fase="${f.id}">${esc(f.titulo)}</button>`).join('')}
+    </div>
+    <div class="dlg-cuerpo" id="dlg-cuerpo">
+      ${FASES.map((f) => `<fieldset data-fase="${f.id}"><legend>${f.titulo}</legend><div class="campos">
         ${COLUMNAS.filter((c) => c.fase === f.id).map((c) => campoHtml(c, base[c.key])).join('')}</div>
         ${f.id === 1 && p ? `<div class="info">Posición WGS84: ${p.lat.toFixed(6)}, ${p.lon.toFixed(6)} · <a target="_blank" rel="noopener" href="${esc(googleMapsUrl(base))}">Abrir en Google Maps</a></div>` : ''}
         ${f.id === 2 ? '<div class="info" id="eclosion-est"></div>' : ''}
@@ -360,7 +528,8 @@ function abrirFicha(nido) {
     </div>
     <div class="dlg-pie">
       <span class="msg" id="msg"></span>
-      ${esNuevo ? '' : '<button type="button" class="btn peligro" id="dlg-borrar">Eliminar</button>'}
+      ${esNuevo ? '' : '<button type="button" class="btn" id="dlg-informe-nido" title="Emitir informe técnico editable de este nido">Informe del nido</button>'}
+      ${esNuevo || !puedeEliminar() ? '' : '<button type="button" class="btn peligro" id="dlg-borrar">Eliminar</button>'}
       <button type="submit" class="btn primario" id="dlg-guardar">Guardar nido</button>
     </div></form>`;
 
@@ -379,7 +548,37 @@ function abrirFicha(nido) {
   dlg.querySelector('.dlg-cuerpo').addEventListener('input', refrescarCalculos);
   refrescarCalculos();
 
+  // Presentación: toda la ficha seguida ("completa") o una pestaña por fase.
+  // Todos los campos permanecen en el DOM, así que guardar funciona igual en ambos modos.
+  let modo = leerModoFicha();
+  let faseActiva = FASES[0].id;
+  const pintarVista = () => {
+    const cuerpo = document.getElementById('dlg-cuerpo');
+    cuerpo.classList.toggle('modo-fases', modo === 'fases');
+    document.getElementById('fase-tabs').hidden = modo !== 'fases';
+    document.querySelectorAll('#dlg-vista button').forEach((b) => b.classList.toggle('activa', b.dataset.modo === modo));
+    document.querySelectorAll('#fase-tabs button').forEach((b) => b.classList.toggle('activa', Number(b.dataset.fase) === faseActiva));
+    cuerpo.querySelectorAll('fieldset').forEach((fs) => fs.classList.toggle('activa', Number(fs.dataset.fase) === faseActiva));
+    cuerpo.scrollTop = 0;
+  };
+  document.getElementById('dlg-vista').onclick = (ev) => {
+    const m = ev.target.dataset?.modo;
+    if (!m) return;
+    modo = m;
+    guardarModoFicha(m);
+    pintarVista();
+  };
+  document.getElementById('fase-tabs').onclick = (ev) => {
+    const f = Number(ev.target.dataset?.fase);
+    if (!f) return;
+    faseActiva = f;
+    pintarVista();
+  };
+  pintarVista();
+
   document.getElementById('dlg-cerrar').onclick = () => dlg.close();
+  const informeNido = document.getElementById('dlg-informe-nido');
+  if (informeNido) informeNido.onclick = () => { dlg.close(); abrirInformes({ nido: base }); };
   const borrar = document.getElementById('dlg-borrar');
   if (borrar) borrar.onclick = async () => {
     if (!confirm('¿Eliminar este nido? Se marcará como borrado y desaparecerá de la app tras sincronizar.')) return;
@@ -402,6 +601,29 @@ function abrirFicha(nido) {
     }
   };
   dlg.showModal();
+}
+
+// ── Informes técnicos editables ─────────────────────────────────────────────
+function describirFiltros() {
+  const f = estado.filtro;
+  return [
+    f.texto && `texto «${f.texto}»`,
+    f.municipio && `municipio: ${f.municipio}`,
+    f.especie && `especie: ${f.especie}`,
+    f.proyecto && `proyecto: ${f.proyecto}`,
+    f.estado && `estado: ${f.estado}`,
+  ].filter(Boolean).join('; ');
+}
+
+function abrirInformes(op = {}) {
+  abrirInformesUI({
+    dlg: document.getElementById('dlg-informe'),
+    seleccion: visibles(),
+    todos: estado.nidos,
+    filtros: describirFiltros(),
+    email: estado.sesion?.user?.email ?? '',
+    nido: op.nido ?? null,
+  });
 }
 
 // ── Exportación ─────────────────────────────────────────────────────────────

@@ -17,30 +17,33 @@ class SyncStatusIcon extends StatelessWidget {
       listenable: sync,
       builder: (context, _) {
         final s = sync.state;
-        late final Widget icon;
-        late final String tooltip;
-        switch (s.status) {
-          case SyncStatus.syncing:
-            icon = const SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.5, color: naranja),
-            );
-            tooltip = 'Sincronizando…';
-          case SyncStatus.pending:
-            icon = Icon(s.isConfigured ? Icons.cloud_upload : Icons.cloud_off,
-                color: naranja);
-            tooltip = !s.isConfigured
-                ? '${s.pendingCount} pendientes · Supabase no configurado (solo local)'
-                : '${s.pendingCount} pendientes de sincronizar'
-                    '${s.isOnline ? '' : ' · sin conexión'}'
-                    '${s.lastError != null ? '\n${s.lastError}' : ''}';
-          case SyncStatus.synced:
-            icon = Icon(s.isConfigured ? Icons.cloud_done : Icons.cloud_off,
-                color: s.isConfigured ? verde : naranja);
-            tooltip = s.isConfigured
-                ? 'Todo sincronizado'
-                : 'Supabase no configurado (solo local)';
+        final Widget icon;
+        final String tooltip;
+        if (s.status == SyncStatus.syncing) {
+          icon = const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2.5, color: naranja),
+          );
+          tooltip = 'Sincronizando…';
+        } else if (s.needsLogin) {
+          icon = const Icon(Icons.cloud_off, color: naranja);
+          tooltip = 'Sin sesión: inicia sesión para sincronizar'
+              '${s.pendingCount > 0 ? ' (${s.pendingCount} pendientes)' : ''}';
+        } else if (s.status == SyncStatus.pending) {
+          icon = Icon(s.isConfigured ? Icons.cloud_upload : Icons.cloud_off,
+              color: naranja);
+          tooltip = !s.isConfigured
+              ? '${s.pendingCount} pendientes · Supabase no configurado (solo local)'
+              : '${s.pendingCount} pendientes de sincronizar'
+                  '${s.isOnline ? '' : ' · sin conexión'}'
+                  '${s.lastError != null ? '\n${s.lastError}' : ''}';
+        } else {
+          icon = Icon(s.isConfigured ? Icons.cloud_done : Icons.cloud_off,
+              color: s.isConfigured ? verde : naranja);
+          tooltip = s.isConfigured
+              ? 'Todo sincronizado'
+              : 'Supabase no configurado (solo local)';
         }
         return Tooltip(
           message: tooltip,
