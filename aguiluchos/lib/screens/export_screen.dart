@@ -1,16 +1,15 @@
-import 'dart:io';
-import 'dart:typed_data';
-
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../app/app_services.dart';
 import '../models/nido_constants.dart';
 import '../models/nido_filter.dart';
 import '../models/nido_grefa_model.dart';
 import '../services/export_service.dart';
+import 'informe_tecnico_screen.dart';
+import '../utils/geografia.dart';
+import '../widgets/entrega_archivos.dart';
+import '../widgets/filtro_geografico.dart';
 import '../widgets/responsive.dart';
 
 /// Exportación a Excel y PDF con filtros y selector de columnas a la carta.
@@ -21,8 +20,6 @@ class ExportScreen extends StatefulWidget {
   State<ExportScreen> createState() => _ExportScreenState();
 }
 
-enum _Entrega { compartir, guardar }
-
 class _ExportScreenState extends State<ExportScreen> {
   static const _estados = [
     EstadoReproductivo.todos,
@@ -32,7 +29,8 @@ class _ExportScreenState extends State<ExportScreen> {
 
   DateTimeRange? _rango;
   final Set<String> _municipiosSel = {};
-  List<String> _municipios = const [];
+  NidoFilter _geo = const NidoFilter();
+  List<NidoGrefaModel> _todos = const [];
   EstadoReproductivo _estado = EstadoReproductivo.todos;
   final Set<String> _columnas = {for (final c in nidoColumns) c.key};
   int? _coinciden;
@@ -41,6 +39,10 @@ class _ExportScreenState extends State<ExportScreen> {
 
   NidoFilter get _filter => NidoFilter(
         municipios: _municipiosSel,
+        pais: _geo.pais,
+        comunidad: _geo.comunidad,
+        provincia: _geo.provincia,
+        localidad: _geo.localidad,
         estado: _estado,
         fechaDesde: _rango?.start,
         fechaHasta: _rango?.end,
@@ -52,8 +54,8 @@ class _ExportScreenState extends State<ExportScreen> {
     if (_didInit) return;
     _didInit = true;
     final db = AppServices.of(context).db;
-    db.municipios().then((m) {
-      if (mounted) setState(() => _municipios = m);
+    db.consultar(const NidoFilter()).then((t) {
+      if (mounted) setState(() => _todos = t);
     });
     _contar();
   }
@@ -68,10 +70,18 @@ class _ExportScreenState extends State<ExportScreen> {
     return [
       if (_rango != null)
         'campaña ${f.format(_rango!.start)} - ${f.format(_rango!.end)}',
+      if (_geo.tieneFiltroGeografico) 'ubicación: ${resumenGeo(_geo)}',
       if (_municipiosSel.isNotEmpty) 'municipios: ${_municipiosSel.join(', ')}',
       if (_estado != EstadoReproductivo.todos) 'estado: ${_estado.etiqueta}',
     ].join(' | ');
   }
+
+  /// Localidades que existen dentro de la ubicación elegida (sin «Sin indicar»).
+  List<String> get _localidadesDisponibles => opcionesCascada(_todos,
+          pais: _geo.pais, comunidad: _geo.comunidad, provincia: _geo.provincia)
+      .localidades
+      .where((l) => l != sinDato)
+      .toList();
 
   List<NidoColumn> get _columnasSeleccionadas =>
       nidoColumns.where((c) => _columnas.contains(c.key)).toList();
@@ -92,122 +102,75 @@ class _ExportScreenState extends State<ExportScreen> {
     }
   }
 
-  Future<void> _exportarExcel() async {
-    if (_columnas.isEmpty) {
-      _snack('Selecciona al menos una columna.');
-      return;
-    }
-    await _generar(
+  Future<ArchivoExportado?> _prepararExcel(List<NidoGrefaModel> nidos) async {
+    final bytes = AppServices.of(context)
+        .export
+        .generarExcel(nidos, _columnasSeleccionadas);
+    return ArchivoExportado(
       nombre: ExportService.nombreArchivo('nidos_aguiluchos', 'xlsx'),
       mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       ext: 'xlsx',
-      build: (nidos) async => AppServices.of(context)
-          .export
-          .generarExcel(nidos, _columnasSeleccionadas),
+      bytes: bytes,
     );
   }
 
-  Future<void> _exportarPdf() async {
-    await _generar(
+  Future<ArchivoExportado?> _prepararPdf(List<NidoGrefaModel> nidos) async {
+    final bytes = await AppServices.of(context).export.generarPdf(
+          nidos,
+          descripcionFiltros: _descripcionFiltros,
+        );
+    return ArchivoExportado(
       nombre: ExportService.nombreArchivo('informe_aguiluchos', 'pdf'),
       mime: 'application/pdf',
       ext: 'pdf',
-      build: (nidos) => AppServices.of(context).export.generarPdf(
-            nidos,
-            descripcionFiltros: _descripcionFiltros,
-          ),
+      bytes: bytes,
     );
   }
 
-  Future<void> _generar({
-    required String nombre,
-    required String mime,
-    required String ext,
-    required Future<Uint8List> Function(List<NidoGrefaModel>) build,
-  }) async {
+  Future<void> _exportarExcel() => _generar(excel: true, pdf: false);
+
+  Future<void> _exportarPdf() => _generar(excel: false, pdf: true);
+
+  Future<void> _exportarAmbos() => _generar(excel: true, pdf: true);
+
+  /// Informe técnico completo y editable con los nidos que cumplen los filtros.
+  Future<void> _informeTecnico() async {
+    final nav = Navigator.of(context);
+    final nidos = await AppServices.of(context).db.consultar(_filter);
+    if (nidos.isEmpty) {
+      _snack('No hay nidos que cumplan los filtros.');
+      return;
+    }
+    if (!mounted) return;
+    await nav.push(MaterialPageRoute<void>(
+      builder: (_) => InformeTecnicoScreen(nidos: nidos, filtros: _descripcionFiltros),
+    ));
+  }
+
+  Future<void> _generar({required bool excel, required bool pdf}) async {
+    if (excel && _columnas.isEmpty) {
+      _snack('Selecciona al menos una columna.');
+      return;
+    }
     final services = AppServices.of(context);
     setState(() => _busy = true);
+    final archivos = <ArchivoExportado>[];
     try {
       final nidos = await services.db.consultar(_filter);
       if (nidos.isEmpty) {
         _snack('No hay nidos que cumplan los filtros.');
         return;
       }
-      final bytes = await build(nidos);
-      if (!mounted) return;
-      setState(() => _busy = false);
-      await _entregar(bytes, nombre, mime, ext);
+      if (excel) archivos.add((await _prepararExcel(nidos))!);
+      if (pdf) archivos.add((await _prepararPdf(nidos))!);
     } catch (e) {
       _snack('Error al generar el archivo: $e');
+      return;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  Future<void> _entregar(
-      Uint8List bytes, String nombre, String mime, String ext) async {
-    final choice = await showModalBottomSheet<_Entrega>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            title: Text(nombre,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text('${(bytes.length / 1024).toStringAsFixed(1)} KB'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.share),
-            title: const Text('Compartir'),
-            subtitle: const Text('WhatsApp, correo electrónico, Drive…'),
-            onTap: () => Navigator.pop(ctx, _Entrega.compartir),
-          ),
-          ListTile(
-            leading: const Icon(Icons.save_alt),
-            title: const Text('Guardar en este dispositivo'),
-            onTap: () => Navigator.pop(ctx, _Entrega.guardar),
-          ),
-        ]),
-      ),
-    );
-    if (choice == null || !mounted) return;
-    final export = AppServices.of(context).export;
-
-    Future<void> guardar() async {
-      if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-        final loc = await getSaveLocation(
-          suggestedName: nombre,
-          acceptedTypeGroups: [
-            XTypeGroup(label: ext.toUpperCase(), extensions: [ext]),
-          ],
-        );
-        if (loc == null) return;
-        await File(loc.path).writeAsBytes(bytes, flush: true);
-        _snack('Guardado en ${loc.path}');
-      } else {
-        final f = await export.guardarEnApp(bytes, nombre);
-        _snack('Guardado en ${f.path}');
-      }
-    }
-
-    try {
-      if (choice == _Entrega.guardar) {
-        await guardar();
-      } else {
-        try {
-          final f = await export.guardarTemporal(bytes, nombre);
-          await SharePlus.instance.share(ShareParams(
-            files: [XFile(f.path, mimeType: mime, name: nombre)],
-            subject: 'Aguiluchos GREFA - $nombre',
-            text: 'Informe de la campaña Aguilucho (GREFA).',
-          ));
-        } on UnimplementedError {
-          _snack('Compartir archivos no está disponible en este sistema; elige dónde guardarlo.');
-          await guardar();
-        }
-      }
-    } catch (e) {
-      _snack('No se pudo completar la acción: $e');
-    }
+    if (!mounted) return;
+    await entregarArchivos(context, archivos);
   }
 
   void _snack(String m) {
@@ -258,14 +221,32 @@ class _ExportScreenState extends State<ExportScreen> {
           },
         ),
         const SizedBox(height: 16),
-        Text('Municipios (vacío = todos)',
+        Text('Ubicación', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 6),
+        FiltroGeografico(
+          nidos: _todos,
+          filter: _geo,
+          onChanged: (g) {
+            setState(() {
+              _geo = g;
+              // Las localidades marcadas deben seguir dentro de la ubicación elegida.
+              final validas = opcionesCascada(_todos,
+                      pais: g.pais, comunidad: g.comunidad, provincia: g.provincia)
+                  .localidades;
+              _municipiosSel.removeWhere((m) => !validas.contains(m));
+            });
+            _contar();
+          },
+        ),
+        const SizedBox(height: 16),
+        Text('Localidades (selección múltiple; vacío = todas las de la ubicación)',
             style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 6),
-        if (_municipios.isEmpty)
-          const Text('Aún no hay municipios registrados.')
+        if (_localidadesDisponibles.isEmpty)
+          const Text('Aún no hay localidades registradas.')
         else
           Wrap(spacing: 8, runSpacing: 4, children: [
-            for (final m in _municipios)
+            for (final m in _localidadesDisponibles)
               FilterChip(
                 label: Text(m),
                 selected: _municipiosSel.contains(m),
@@ -363,6 +344,18 @@ class _ExportScreenState extends State<ExportScreen> {
           onPressed: _busy ? null : _exportarPdf,
           icon: const Icon(Icons.picture_as_pdf),
           label: const Text('Generar Informe PDF'),
+        ),
+        OutlinedButton.icon(
+          key: const Key('exportar-ambos'),
+          onPressed: _busy ? null : _exportarAmbos,
+          icon: const Icon(Icons.library_books_outlined),
+          label: const Text('Excel + PDF'),
+        ),
+        FilledButton.tonalIcon(
+          key: const Key('exportar-informe-tecnico'),
+          onPressed: _busy ? null : _informeTecnico,
+          icon: const Icon(Icons.assignment_outlined),
+          label: const Text('Informe técnico completo'),
         ),
       ]);
 

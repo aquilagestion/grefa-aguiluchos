@@ -130,6 +130,15 @@ class NidoGrefaModel {
   // ── Control ──────────────────────────────────────────────────────────────
   final String id;
 
+  /// Marca de edición de los nidos de la carga inicial empaquetada en la APK.
+  /// Es anterior a cualquier edición real: si Supabase ya tiene el nido, gana
+  /// siempre la versión remota (sin avisar de conflicto).
+  static final DateTime marcaCargaInicial = DateTime.utc(2026, 1, 1);
+
+  /// `true` si el nido sigue tal cual vino de la carga inicial.
+  bool get esCargaInicialSinEditar =>
+      !isSynced && updatedAt.isAtSameMomentAs(marcaCargaInicial);
+
   /// Marca de tiempo de la última edición (UTC). Base del Last-Write-Wins.
   DateTime updatedAt;
 

@@ -4,14 +4,26 @@ import 'nido_constants.dart';
 class NidoFilter {
   const NidoFilter({
     this.municipios = const {},
+    this.pais,
+    this.comunidad,
+    this.provincia,
+    this.localidad,
     this.estado = EstadoReproductivo.todos,
     this.query = '',
     this.fechaDesde,
     this.fechaHasta,
   });
 
-  /// Vacío = todos los municipios.
+  /// Vacío = todos los municipios (selección múltiple, usada al exportar).
   final Set<String> municipios;
+
+  /// Filtros geográficos en cascada (derivados de provincia y municipio, ver
+  /// `utils/geografia.dart`). `null` = todos.
+  final String? pais;
+  final String? comunidad;
+  final String? provincia;
+  final String? localidad;
+
   final EstadoReproductivo estado;
 
   /// Texto libre: busca en etiqueta y propietario.
@@ -22,13 +34,19 @@ class NidoFilter {
   final DateTime? fechaDesde;
   final DateTime? fechaHasta;
 
+  bool get tieneFiltroGeografico =>
+      pais != null || comunidad != null || provincia != null || localidad != null;
+
   bool get isEmpty =>
       municipios.isEmpty &&
+      !tieneFiltroGeografico &&
       estado == EstadoReproductivo.todos &&
       query.trim().isEmpty &&
       fechaDesde == null &&
       fechaHasta == null;
 
+  /// Conserva los filtros geográficos; para cambiarlos (o ponerlos a `null`)
+  /// usa [conGeo].
   NidoFilter copyWith({
     Set<String>? municipios,
     EstadoReproductivo? estado,
@@ -39,9 +57,27 @@ class NidoFilter {
   }) =>
       NidoFilter(
         municipios: municipios ?? this.municipios,
+        pais: pais,
+        comunidad: comunidad,
+        provincia: provincia,
+        localidad: localidad,
         estado: estado ?? this.estado,
         query: query ?? this.query,
         fechaDesde: limpiarFechas ? null : (fechaDesde ?? this.fechaDesde),
         fechaHasta: limpiarFechas ? null : (fechaHasta ?? this.fechaHasta),
+      );
+
+  /// Sustituye los cuatro niveles geográficos de una vez (permite nulos).
+  NidoFilter conGeo({String? pais, String? comunidad, String? provincia, String? localidad}) =>
+      NidoFilter(
+        municipios: municipios,
+        pais: pais,
+        comunidad: comunidad,
+        provincia: provincia,
+        localidad: localidad,
+        estado: estado,
+        query: query,
+        fechaDesde: fechaDesde,
+        fechaHasta: fechaHasta,
       );
 }

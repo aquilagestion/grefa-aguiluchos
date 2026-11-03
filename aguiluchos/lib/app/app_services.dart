@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 
+import '../services/auth_service.dart';
+import '../services/contratos_service.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
 import '../services/image_storage_service.dart';
@@ -15,6 +17,8 @@ class AppServices extends InheritedWidget {
     required this.images,
     required this.location,
     required this.export,
+    this.auth,
+    this.contratos,
     required super.child,
   });
 
@@ -23,6 +27,12 @@ class AppServices extends InheritedWidget {
   final ImageStorageService images;
   final LocationService location;
   final ExportService export;
+
+  /// `null` si la app se ejecuta sin Supabase (solo local).
+  final AuthService? auth;
+
+  /// Parcelas, propietarios y convenios (solo lectura). `null` en tests.
+  final ContratosService? contratos;
 
   static AppServices of(BuildContext context) {
     final s = context.dependOnInheritedWidgetOfExactType<AppServices>();

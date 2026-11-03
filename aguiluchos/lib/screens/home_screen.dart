@@ -8,12 +8,18 @@ import '../models/nido_constants.dart';
 import '../models/nido_filter.dart';
 import '../models/nido_grefa_model.dart';
 import '../services/excel_import_service.dart';
+import '../services/location_service.dart';
+import '../utils/geo.dart';
+import '../widgets/filtro_geografico.dart';
 import '../widgets/nido_card.dart';
 import '../widgets/nidos_map.dart';
 import '../widgets/responsive.dart';
 import '../widgets/sync_status_icon.dart';
+import 'contratos_screen.dart';
 import 'export_screen.dart';
+import 'login_screen.dart';
 import 'nido_detail_screen.dart';
+import 'radar_screen.dart';
 
 enum _Vista { lista, mapa }
 
@@ -28,10 +34,11 @@ class _HomeScreenState extends State<HomeScreen> {
   NidoFilter _filter = const NidoFilter();
   _Vista _vista = _Vista.lista;
   List<NidoGrefaModel> _nidos = const [];
-  List<String> _municipios = const [];
+  List<NidoGrefaModel> _todos = const [];
   bool _loading = true;
   StreamSubscription<void>? _sub;
   bool _didInit = false;
+  bool _buscandoGps = false;
   final _searchCtrl = TextEditingController();
 
   @override
@@ -53,18 +60,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _cargar() async {
     final db = AppServices.of(context).db;
-    final nidos = await db.consultar(_filter);
-    final municipios = await db.municipios();
+    final todos = await db.consultar(const NidoFilter());
+    // Si la ubicación filtrada ya no existe (nido borrado o editado), se limpia.
+    final original = _filter;
+    final filtro = sanearGeo(original, todos);
+    final nidos = await db.consultar(filtro);
     if (!mounted) return;
     setState(() {
+      _todos = todos;
       _nidos = nidos;
-      _municipios = municipios;
       _loading = false;
-      // Si el municipio filtrado ya no existe, se limpia el filtro.
-      if (_filter.municipios.isNotEmpty &&
-          !municipios.contains(_filter.municipios.first)) {
-        _filter = _filter.copyWith(municipios: <String>{});
-      }
+      // Solo si el usuario no ha cambiado el filtro mientras tanto.
+      if (identical(_filter, original)) _filter = filtro;
     });
   }
 
@@ -80,6 +87,69 @@ class _HomeScreenState extends State<HomeScreen> {
     _cargar();
   }
 
+  /// Crea un nido nuevo a partir de la posición GPS actual: captura la
+  /// posición, avisa si es poco precisa o si ya hay un nido junto a ella y
+  /// abre el formulario con las coordenadas rellenadas.
+  Future<void> _nuevoDesdeGps() async {
+    if (_buscandoGps) return;
+    final services = AppServices.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _buscandoGps = true);
+    messenger.showSnackBar(const SnackBar(
+        content: Text('Obteniendo posición GPS…'),
+        duration: Duration(seconds: 30)));
+    try {
+      final pos = await services.location.posicionActual();
+      final todos = await services.db.consultar(const NidoFilter());
+      messenger.hideCurrentSnackBar();
+      if (!mounted) return;
+
+      final cerca = nidoMasCercano(todos, pos.latitude, pos.longitude);
+      final lineas = <String>[
+        if (pos.accuracy > 25)
+          'La precisión del GPS es baja (±${pos.accuracy.toStringAsFixed(0)} m). '
+              'Conviene esperar unos segundos al aire libre.',
+        if (cerca != null)
+          'Ya existe el nido ${cerca.nido.etiqueta ?? cerca.nido.numeracion ?? ''} '
+              'a ${cerca.metros.toStringAsFixed(0)} m de aquí.',
+      ];
+      if (lineas.isNotEmpty) {
+        final seguir = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(Icons.my_location),
+            title: const Text('Revisa la posición'),
+            content: Text('${lineas.join('\n\n')}\n\n¿Crear el nido en esta posición?'),
+            actions: [
+              TextButton(
+                  key: const Key('gps-cancelar'),
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  key: const Key('gps-crear'),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Crear aquí')),
+            ],
+          ),
+        );
+        if (seguir != true || !mounted) return;
+      }
+      messenger.showSnackBar(SnackBar(
+          content: Text(
+              'Posición GPS capturada (±${pos.accuracy.toStringAsFixed(0)} m).')));
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => NidoDetailScreen(
+            plantilla: nidoDesdePosicion(pos.latitude, pos.longitude)),
+      ));
+      _cargar();
+    } on LocationException catch (e) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _buscandoGps = false);
+    }
+  }
   Future<void> _sincronizar() async {
     final sync = AppServices.of(context).sync;
     final messenger = ScaffoldMessenger.of(context);
@@ -91,6 +161,29 @@ class _HomeScreenState extends State<HomeScreen> {
             : 'Sincronizado: ${r.pushed} subidos, ${r.pulled} descargados'
                 '${r.conflicts > 0 ? ', ${r.conflicts} conflictos' : ''}.';
     messenger.showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _cerrarSesion() async {
+    final auth = AppServices.of(context).auth;
+    if (auth == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Cerrar sesión?'),
+        content: const Text(
+            'Los datos de este dispositivo se conservan. Lo pendiente se '
+            'subirá cuando vuelvas a iniciar sesión.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Cerrar sesión')),
+        ],
+      ),
+    );
+    if (ok == true) await auth.signOut();
   }
 
   Future<void> _importarExcel() async {
@@ -146,6 +239,20 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: const Icon(Icons.sync),
             ),
           IconButton(
+            key: const Key('btn-radar'),
+            tooltip: 'Radar de nidos',
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const RadarScreen())),
+            icon: const Icon(Icons.radar),
+          ),
+          if (services.contratos != null)
+            IconButton(
+              tooltip: 'Contratos y parcelas',
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ContratosScreen())),
+              icon: const Icon(Icons.description_outlined),
+            ),
+          IconButton(
             tooltip: 'Exportar informes',
             onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const ExportScreen())),
@@ -155,24 +262,83 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: 'Más opciones',
             onSelected: (v) {
               if (v == 'importar') _importarExcel();
+              if (v == 'entrar') services.auth?.requestLogin();
+              if (v == 'clave' && services.auth != null) {
+                mostrarCambiarClave(context, services.auth!);
+              }
+              if (v == 'salir') _cerrarSesion();
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'importar',
-                child: ListTile(
-                  leading: Icon(Icons.upload_file),
-                  title: Text('Importar desde Excel (.xlsx)'),
-                  contentPadding: EdgeInsets.zero,
+            itemBuilder: (_) {
+              final auth = services.auth;
+              return [
+                const PopupMenuItem(
+                  value: 'importar',
+                  child: ListTile(
+                    leading: Icon(Icons.upload_file),
+                    title: Text('Importar desde Excel (.xlsx)'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
-              ),
-            ],
+                if (auth != null && auth.requiresLogin && !auth.isSignedIn)
+                  const PopupMenuItem(
+                    value: 'entrar',
+                    child: ListTile(
+                      leading: Icon(Icons.login),
+                      title: Text('Iniciar sesión'),
+                      subtitle: Text('Para sincronizar con la oficina'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                if (auth != null && auth.isSignedIn)
+                  const PopupMenuItem(
+                    value: 'clave',
+                    child: ListTile(
+                      leading: Icon(Icons.lock_reset),
+                      title: Text('Cambiar contraseña'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                if (auth != null && auth.isSignedIn)
+                  PopupMenuItem(
+                    value: 'salir',
+                    child: ListTile(
+                      leading: const Icon(Icons.logout),
+                      title: const Text('Cerrar sesión'),
+                      subtitle: Text(
+                          '${auth.email ?? ''}${auth.isAdmin ? ' · administrador' : ''}'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+              ];
+            },
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _abrirNido(null),
-        icon: const Icon(Icons.add),
-        label: const Text('Nuevo Nido'),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.extended(
+            key: const Key('fab-nido-gps'),
+            heroTag: 'fab-nido-gps',
+            onPressed: _buscandoGps ? null : _nuevoDesdeGps,
+            icon: _buscandoGps
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.my_location),
+            label: const Text('Nido en mi posición'),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.extended(
+            key: const Key('fab-nido-nuevo'),
+            heroTag: 'fab-nido-nuevo',
+            onPressed: () => _abrirNido(null),
+            icon: const Icon(Icons.add),
+            label: const Text('Nuevo Nido'),
+          ),
+        ],
       ),
       body: SafeArea(
         child: wide ? _buildWide() : _buildNarrow(),
@@ -187,7 +353,7 @@ class _HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
           child: _Filtros(
             filter: _filter,
-            municipios: _municipios,
+            todos: _todos,
             searchCtrl: _searchCtrl,
             onChanged: _setFilter,
           ),
@@ -225,7 +391,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.all(12),
                 child: _Filtros(
                   filter: _filter,
-                  municipios: _municipios,
+                  todos: _todos,
                   searchCtrl: _searchCtrl,
                   onChanged: _setFilter,
                 ),
@@ -255,35 +421,42 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-      itemCount: _nidos.length,
-      itemBuilder: (context, i) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: NidoCard(nido: _nidos[i], onTap: () => _abrirNido(_nidos[i])),
-      ),
-    );
+    final contratos = AppServices.of(context).contratos;
+    Widget lista() => ListView.builder(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+          itemCount: _nidos.length,
+          itemBuilder: (context, i) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: NidoCard(
+              nido: _nidos[i],
+              semaforo: (contratos == null || contratos.datos.vacio)
+                  ? null
+                  : contratos.estadoDe(_nidos[i]).codigo,
+              onTap: () => _abrirNido(_nidos[i]),
+            ),
+          ),
+        );
+    return contratos == null
+        ? lista()
+        : ListenableBuilder(listenable: contratos, builder: (_, _) => lista());
   }
 }
 
 class _Filtros extends StatelessWidget {
   const _Filtros({
     required this.filter,
-    required this.municipios,
+    required this.todos,
     required this.searchCtrl,
     required this.onChanged,
   });
 
   final NidoFilter filter;
-  final List<String> municipios;
+  final List<NidoGrefaModel> todos;
   final TextEditingController searchCtrl;
   final ValueChanged<NidoFilter> onChanged;
 
   @override
   Widget build(BuildContext context) {
-    final municipioActual =
-        filter.municipios.isEmpty ? null : filter.municipios.first;
-
     final buscador = TextField(
       controller: searchCtrl,
       decoration: InputDecoration(
@@ -302,18 +475,11 @@ class _Filtros extends StatelessWidget {
       onChanged: (v) => onChanged(filter.copyWith(query: v)),
     );
 
-    final municipio = DropdownButtonFormField<String?>(
-      key: ValueKey('mun-$municipioActual-${municipios.length}'),
-      initialValue: municipioActual,
-      isExpanded: true,
-      decoration: const InputDecoration(labelText: 'Municipio'),
-      items: [
-        const DropdownMenuItem<String?>(value: null, child: Text('Todos')),
-        for (final m in municipios)
-          DropdownMenuItem<String?>(value: m, child: Text(m)),
-      ],
-      onChanged: (v) =>
-          onChanged(filter.copyWith(municipios: v == null ? <String>{} : {v})),
+    final ubicacion = FiltroGeografico(
+      nidos: todos,
+      filter: filter,
+      onChanged: onChanged,
+      plegable: true,
     );
 
     final estado = DropdownButtonFormField<EstadoReproductivo>(
@@ -332,11 +498,9 @@ class _Filtros extends StatelessWidget {
       children: [
         buscador,
         const SizedBox(height: 8),
-        Row(children: [
-          Expanded(child: municipio),
-          const SizedBox(width: 8),
-          Expanded(child: estado),
-        ]),
+        ubicacion,
+        const SizedBox(height: 8),
+        estado,
       ],
     );
   }

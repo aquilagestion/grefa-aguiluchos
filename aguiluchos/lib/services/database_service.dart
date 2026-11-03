@@ -11,6 +11,7 @@ import '../models/nido_constants.dart';
 import '../models/nido_filter.dart';
 import 'app_directories.dart';
 import '../models/nido_grefa_model.dart';
+import '../utils/geografia.dart';
 
 /// Persistencia local (SQLite). Fuente de verdad de la app: todo se lee y
 /// escribe aquí, y [SyncService] se encarga de reflejarlo en Supabase.
@@ -107,9 +108,10 @@ CREATE TABLE $nidosTable (
 
   /// Inserta o actualiza un nido. Siempre marca `isSynced=false`, refresca
   /// `updatedAt` y limpia `hasConflict` (el usuario ya lo ha revisado).
-  Future<NidoGrefaModel> guardar(NidoGrefaModel nido) async {
+  Future<NidoGrefaModel> guardar(NidoGrefaModel nido,
+      {DateTime? updatedAt}) async {
     nido
-      ..updatedAt = _clock().toUtc()
+      ..updatedAt = (updatedAt ?? _clock()).toUtc()
       ..isSynced = false
       ..hasConflict = false;
     await _database.insert(nidosTable, nido.toMap(),
@@ -173,6 +175,18 @@ CREATE TABLE $nidosTable (
       orderBy: 'updated_at DESC',
     );
     var nidos = rows.map(NidoGrefaModel.fromMap).toList();
+
+    // País / comunidad / provincia / localidad: jerarquía derivada, se aplica
+    // en Dart (ver utils/geografia.dart).
+    if (filter.tieneFiltroGeografico) {
+      nidos = nidos.where((n) {
+        final u = ubicacionDe(n);
+        return (filter.pais == null || u.pais == filter.pais) &&
+            (filter.comunidad == null || u.comunidad == filter.comunidad) &&
+            (filter.provincia == null || u.provincia == filter.provincia) &&
+            (filter.localidad == null || u.localidad == filter.localidad);
+      }).toList();
+    }
 
     // La búsqueda libre se hace en Dart: SQLite LIKE no ignora mayúsculas
     // acentuadas (Á/á) y el volumen de datos es pequeño.

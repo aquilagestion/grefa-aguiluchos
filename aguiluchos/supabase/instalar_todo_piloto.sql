@@ -101,8 +101,17 @@ create trigger nidos_grefa_before_write
   before insert or update on public.nidos_grefa
   for each row execute function public.nidos_grefa_before_write();
 
--- 3) Realtime opcional (para que el panel web vea cambios al instante) -------
--- alter publication supabase_realtime add table public.nidos_grefa;
+-- 3) Realtime (el panel web recibe los cambios de la app al instante) -------
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'nidos_grefa'
+  ) then
+    alter publication supabase_realtime add table public.nidos_grefa;
+  end if;
+end
+$$;
 
 -- 4) RLS ---------------------------------------------------------------------
 alter table public.nidos_grefa enable row level security;

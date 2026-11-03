@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/nido_grefa_model.dart';
+import 'auth_service.dart';
 import 'database_service.dart';
 import 'last_write_wins.dart';
 import 'remote_nidos_gateway.dart';
@@ -20,6 +21,7 @@ class SyncState {
     this.lastError,
     this.isOnline = false,
     this.isConfigured = false,
+    this.needsLogin = false,
   });
 
   final SyncStatus status;
@@ -31,6 +33,9 @@ class SyncState {
   /// `false` si no hay credenciales de Supabase: la app funciona solo local.
   final bool isConfigured;
 
+  /// `true` si hay Supabase pero falta iniciar sesión para poder sincronizar.
+  final bool needsLogin;
+
   SyncState copyWith({
     SyncStatus? status,
     int? pendingCount,
@@ -39,6 +44,7 @@ class SyncState {
     bool clearError = false,
     bool? isOnline,
     bool? isConfigured,
+    bool? needsLogin,
   }) =>
       SyncState(
         status: status ?? this.status,
@@ -47,6 +53,7 @@ class SyncState {
         lastError: clearError ? null : (lastError ?? this.lastError),
         isOnline: isOnline ?? this.isOnline,
         isConfigured: isConfigured ?? this.isConfigured,
+        needsLogin: needsLogin ?? this.needsLogin,
       );
 }
 
@@ -84,8 +91,9 @@ class SyncService extends ChangeNotifier {
     RemoteNidosGateway? gateway,
     this._connectivityStream,
     this._initialConnectivity,
+    this._auth,
     this.pageSize = 500,
-    this.periodicInterval = const Duration(minutes: 3),
+    this.periodicInterval = const Duration(minutes: 1),
     DateTime Function()? clock,
   })  : _gateway = gateway,
         _clock = clock ?? DateTime.now,
@@ -95,6 +103,7 @@ class SyncService extends ChangeNotifier {
 
   final DatabaseService _db;
   final RemoteNidosGateway? _gateway;
+  final AuthService? _auth;
   final Stream<bool>? _connectivityStream;
   final Future<bool> Function()? _initialConnectivity;
   final DateTime Function() _clock;
@@ -132,10 +141,29 @@ class SyncService extends ChangeNotifier {
       if (online && !wasOnline) unawaited(syncNow());
     });
     _dbSub = _db.changes.listen((_) => unawaited(_refreshPending()));
+    // Sondeo periódico: además de subir lo pendiente, baja los cambios que
+    // otros operarios o el panel web hayan hecho (pull incremental barato).
     _periodic = Timer.periodic(periodicInterval, (_) {
-      if (_state.isOnline && _state.pendingCount > 0) unawaited(syncNow());
+      if (_state.isOnline && _gateway != null) unawaited(syncNow());
     });
+    _auth?.addListener(_onAuthChanged);
     if (initial) unawaited(syncNow());
+  }
+
+  /// Sincroniza al iniciar sesión; al cerrarla solo refresca el estado.
+  void _onAuthChanged() {
+    if (_disposed) return;
+    if (_auth!.canSync) {
+      unawaited(syncNow());
+    } else {
+      unawaited(_refreshPending());
+    }
+  }
+
+  /// Llamar al volver la app a primer plano: pone al día los datos sin esperar
+  /// al siguiente sondeo.
+  void onAppResumed() {
+    if (_state.isOnline && _gateway != null) requestSync();
   }
 
   static Future<bool> _checkConnectivity() async {
@@ -156,6 +184,10 @@ class SyncService extends ChangeNotifier {
     if (_gateway == null) {
       await _refreshPending();
       return const SyncResult(skippedReason: 'Supabase no está configurado');
+    }
+    if (_auth != null && !_auth.canSync) {
+      await _refreshPending();
+      return const SyncResult(skippedReason: 'Inicia sesión para sincronizar');
     }
     if (!_state.isOnline) {
       await _refreshPending();
@@ -334,7 +366,11 @@ class SyncService extends ChangeNotifier {
     final status = _running
         ? SyncStatus.syncing
         : (count > 0 ? SyncStatus.pending : SyncStatus.synced);
-    _setState(_state.copyWith(pendingCount: count, status: status));
+    _setState(_state.copyWith(
+      pendingCount: count,
+      status: status,
+      needsLogin: _gateway != null && _auth != null && !_auth.canSync,
+    ));
   }
 
   void _setState(SyncState s) {
@@ -347,6 +383,7 @@ class SyncService extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _auth?.removeListener(_onAuthChanged);
     _debounce?.cancel();
     _periodic?.cancel();
     _connSub?.cancel();

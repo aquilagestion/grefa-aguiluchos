@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/contratos.dart';
 import '../models/nido_constants.dart';
 import '../models/nido_grefa_model.dart';
 
@@ -15,11 +16,15 @@ class NidoCard extends StatelessWidget {
     required this.nido,
     required this.onTap,
     this.selected = false,
+    this.semaforo,
   });
 
   final NidoGrefaModel nido;
   final VoidCallback onTap;
   final bool selected;
+
+  /// Estado del contrato de la parcela (`null` si no hay datos de contratos).
+  final Semaforo? semaforo;
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +76,9 @@ class NidoCard extends StatelessWidget {
                             : nido.estadoFinal!,
                         color,
                       ),
+                      if (semaforo != null)
+                        _chip(semaforo!.etiqueta, semaforo!.color,
+                            icon: Icons.description_outlined),
                       if (nido.intervencion)
                         _chip('Intervención', const Color(0xFF6A1B9A),
                             icon: Icons.medical_services_outlined),

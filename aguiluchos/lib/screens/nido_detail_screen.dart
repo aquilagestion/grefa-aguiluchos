@@ -9,16 +9,22 @@ import '../services/image_storage_service.dart';
 import '../services/location_service.dart';
 import '../services/photo_picker.dart';
 import '../utils/utm.dart';
+import 'contratos_screen.dart';
+import 'informe_tecnico_screen.dart';
 import '../widgets/image_picker_widget.dart';
 import '../widgets/maps_launcher.dart';
 import '../widgets/responsive.dart';
 
 /// Ficha de un nido con las 4 fases de la campaña en pestañas.
 class NidoDetailScreen extends StatefulWidget {
-  const NidoDetailScreen({super.key, this.nido, this.photoPicker});
+  const NidoDetailScreen({super.key, this.nido, this.plantilla, this.photoPicker});
 
   /// `null` crea un nido nuevo.
   final NidoGrefaModel? nido;
+
+  /// Nido nuevo precargado (p. ej. con la posición GPS): se trata como nuevo
+  /// pero el formulario arranca con estos datos. Se ignora si [nido] no es nulo.
+  final NidoGrefaModel? plantilla;
 
   /// Inyectable para tests.
   final PhotoPicker? photoPicker;
@@ -50,8 +56,11 @@ class _NidoDetailScreenState extends State<NidoDetailScreen>
   void initState() {
     super.initState();
     _esNuevo = widget.nido == null;
-    _nido = widget.nido?.clone() ?? NidoGrefaModel();
-    _original = _nido.clone();
+    _nido = widget.nido?.clone() ?? widget.plantilla?.clone() ?? NidoGrefaModel();
+    // Con plantilla, el original es un nido en blanco: así se avisa al salir sin guardar.
+    _original = (widget.nido == null && widget.plantilla != null)
+        ? NidoGrefaModel(id: _nido.id)
+        : _nido.clone();
     _fotosVistas.addAll(_nido.localImagePaths);
     _tabController = TabController(length: _tabs.length, vsync: this)
       ..addListener(() => setState(() {}));
@@ -262,6 +271,7 @@ class _NidoDetailScreenState extends State<NidoDetailScreen>
 
   Widget _tabUbicacion() {
     return _pagina([
+      if (!_esNuevo) BloqueContratoNido(nido: _nido),
       FormGrid(children: [
         _field('numeracion'),
         _field('etiqueta',
@@ -701,6 +711,15 @@ class _NidoDetailScreenState extends State<NidoDetailScreen>
                   : _nido.etiqueta!),
           actions: [
             if (!_esNuevo)
+              IconButton(
+                key: const Key('btn-informe-nido'),
+                tooltip: 'Informe técnico del nido',
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => InformeTecnicoScreen(nidos: [_nido], individual: true),
+                )),
+                icon: const Icon(Icons.assignment_outlined),
+              ),
+            if (!_esNuevo && (AppServices.of(context).auth?.canDelete ?? true))
               IconButton(
                 tooltip: 'Borrar nido',
                 onPressed: _borrar,
