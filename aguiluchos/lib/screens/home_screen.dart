@@ -19,6 +19,7 @@ import 'contratos_screen.dart';
 import 'export_screen.dart';
 import 'login_screen.dart';
 import 'nido_detail_screen.dart';
+import 'radar_screen.dart';
 
 enum _Vista { lista, mapa }
 
@@ -237,6 +238,13 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: _sincronizar,
               icon: const Icon(Icons.sync),
             ),
+          IconButton(
+            key: const Key('btn-radar'),
+            tooltip: 'Radar de nidos',
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const RadarScreen())),
+            icon: const Icon(Icons.radar),
+          ),
           if (services.contratos != null)
             IconButton(
               tooltip: 'Contratos y parcelas',

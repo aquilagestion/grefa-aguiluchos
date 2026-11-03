@@ -622,6 +622,7 @@ export const MANUAL = [
 <ul>
   <li>La app <b>Aguiluchos</b> trabaja sin cobertura: guarda los nidos en el móvil y los <b>sincroniza</b> cuando hay conexión (botón de sincronizar, al abrirla y al volver a ella).</li>
   <li>Permite crear nidos, editar las 4 fases, crear un nido en tu <b>posición GPS</b>, ver la lista y el mapa, filtrar, exportar informes e importar desde Excel.</li>
+  <li><b>Radar de nidos</b> (versión 1.7.0, icono de radar en la barra superior): muestra los nidos cercanos a tu posición GPS en un radar con el norte arriba. Amplía o reduce el <b>radio</b> (100 m, 250 m, 500 m, 1 km, 2 km, 5 km, 10 km y 25 km) con los botones + y −, el deslizador o pellizcando. Debajo, la lista ordenada por distancia con el rumbo (N, NE, E…). Toca un nido para ver su distancia y rumbo, abrir su ficha o llegar con Google Maps. Funciona sin cobertura (solo necesita el GPS) y solo muestra los nidos que tienen coordenadas.</li>
   <li>Lo que se anota en la app aparece en este panel y viceversa. Si dos personas editan el mismo nido, se conserva la versión más reciente.</li>
   <li><b>Contratos y parcelas en la app</b> (versión 1.6.0): pantalla de consulta <b>solo lectura</b> con convenios y parcelas, buscador, llamada al titular y apertura de la parcela en el mapa. En la ficha del nido hay un bloque «Parcela y contrato» y en la lista, una etiqueta de semáforo. Se guarda una copia en el móvil para verlo sin cobertura.</li>
   <li>La app <b>no descarga</b> NIF, IBAN, direcciones ni importes de los convenios.</li>
