@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import '../screens/home_screen.dart';
 import '../screens/login_screen.dart';
 import '../services/auth_service.dart';
+import '../services/contratos_service.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
 import '../services/image_storage_service.dart';
@@ -17,6 +18,7 @@ class AguiluchosApp extends StatelessWidget {
     required this.db,
     required this.sync,
     this.auth,
+    this.contratos,
     this._images,
     this._location,
     this._export,
@@ -27,6 +29,7 @@ class AguiluchosApp extends StatelessWidget {
 
   /// `null`: sin login (tests o app sin Supabase).
   final AuthService? auth;
+  final ContratosService? contratos;
   final ImageStorageService? _images;
   final LocationService? _location;
   final ExportService? _export;
@@ -42,6 +45,7 @@ class AguiluchosApp extends StatelessWidget {
       location: _location ?? LocationService(),
       export: _export ?? ExportService(),
       auth: auth,
+      contratos: contratos,
       child: MaterialApp(
         title: 'Aguiluchos',
         debugShowCheckedModeBanner: false,

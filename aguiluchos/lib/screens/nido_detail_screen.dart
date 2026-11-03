@@ -9,6 +9,7 @@ import '../services/image_storage_service.dart';
 import '../services/location_service.dart';
 import '../services/photo_picker.dart';
 import '../utils/utm.dart';
+import 'contratos_screen.dart';
 import 'informe_tecnico_screen.dart';
 import '../widgets/image_picker_widget.dart';
 import '../widgets/maps_launcher.dart';
@@ -270,6 +271,7 @@ class _NidoDetailScreenState extends State<NidoDetailScreen>
 
   Widget _tabUbicacion() {
     return _pagina([
+      if (!_esNuevo) BloqueContratoNido(nido: _nido),
       FormGrid(children: [
         _field('numeracion'),
         _field('etiqueta',

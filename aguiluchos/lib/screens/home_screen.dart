@@ -15,6 +15,7 @@ import '../widgets/nido_card.dart';
 import '../widgets/nidos_map.dart';
 import '../widgets/responsive.dart';
 import '../widgets/sync_status_icon.dart';
+import 'contratos_screen.dart';
 import 'export_screen.dart';
 import 'login_screen.dart';
 import 'nido_detail_screen.dart';
@@ -236,6 +237,13 @@ class _HomeScreenState extends State<HomeScreen> {
               onPressed: _sincronizar,
               icon: const Icon(Icons.sync),
             ),
+          if (services.contratos != null)
+            IconButton(
+              tooltip: 'Contratos y parcelas',
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ContratosScreen())),
+              icon: const Icon(Icons.description_outlined),
+            ),
           IconButton(
             tooltip: 'Exportar informes',
             onPressed: () => Navigator.of(context).push(
@@ -405,14 +413,24 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-      itemCount: _nidos.length,
-      itemBuilder: (context, i) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: NidoCard(nido: _nidos[i], onTap: () => _abrirNido(_nidos[i])),
-      ),
-    );
+    final contratos = AppServices.of(context).contratos;
+    Widget lista() => ListView.builder(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+          itemCount: _nidos.length,
+          itemBuilder: (context, i) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: NidoCard(
+              nido: _nidos[i],
+              semaforo: (contratos == null || contratos.datos.vacio)
+                  ? null
+                  : contratos.estadoDe(_nidos[i]).codigo,
+              onTap: () => _abrirNido(_nidos[i]),
+            ),
+          ),
+        );
+    return contratos == null
+        ? lista()
+        : ListenableBuilder(listenable: contratos, builder: (_, _) => lista());
   }
 }
 
