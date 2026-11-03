@@ -52,3 +52,9 @@ disponible, el panel lo indica y relee los datos cada 90 s.
 
 * No sube ni muestra fotos (`imagenes_urls`) todavía.
 * Exportación solo CSV; para PDF/Excel con formato usa la app.
+
+## Contratos, parcelas y propietarios
+
+1. Ejecuta una vez `aguiluchos/supabase/contratos_parcelas.sql` en el SQL Editor de Supabase (crea tablas, permisos, bucket privado `contratos` y el catálogo de ayudas).
+2. Botón **Contratos** del panel: convenios, parcelas, propietarios, compensación y catálogo de ayudas. En cada nido, bloque «Parcela y contrato» y semáforo (columna, filtro y color del mapa).
+3. Convenios nuevos: «Borrador del convenio» genera el documento editable (PDF / Word) con los datos. Convenios ya firmados: **Contratos → «Leer convenios firmados»** (uno o varios PDF/fotos). La función pi/extraer-contrato.mjs (raíz del repo) los lee con Mistral (OCR + extracción) y propone titular, parcelas, ayudas e importe; se asocian solos a propietarios (NIF/nombre), parcelas (SIGPAC) y nidos (nombre o teléfono del propietario) ya registrados, y tú revisas cada convenio antes de guardar. Requiere la variable **solo de servidor** MISTRAL_API_KEY en Vercel (opcionales MISTRAL_OCR_MODEL, MISTRAL_MODEL). El PDF se guarda en el bucket privado y el IBAN solo con sus 4 últimos dígitos.

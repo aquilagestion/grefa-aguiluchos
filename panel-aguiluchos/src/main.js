@@ -9,6 +9,8 @@ import {
 import { COLUMNAS, FASES, ESPECIES, PROYECTOS } from './columns.js';
 import { opcionesCascada } from './geo.js';
 import { abrirInformesUI } from './informe_ui.js';
+import { crearControlador, puntoSemaforo } from './contratos_ui.js';
+import { FILTROS_CONTRATO, SEMAFORO, grupoSemaforo } from './contratos_logic.js';
 import {
   aCsv, aplicarCambio, estadoReproductivo, filtrar, googleMapsUrl, parseValor, posicion, resumen, validar,
   correoPermitido, esAdmin, validarClave, DOMINIO, MIN_CLAVE,
@@ -20,7 +22,9 @@ const estado = {
   nidos: [],
   cargando: false,
   error: null,
-  filtro: { texto: '', pais: '', comunidad: '', provincia: '', localidad: '', especie: '', proyecto: '', estado: '' },
+  filtro: { texto: '', pais: '', comunidad: '', provincia: '', localidad: '', especie: '', proyecto: '', estado: '', contrato: '' },
+  contratos: null,
+  colorMapa: 'resultado',
   orden: { clave: 'numeracion', asc: true },
   vista: 'tabla',
   mapa: null,
@@ -211,21 +215,33 @@ async function recargar() {
   estado.cargando = true;
   estado.error = null;
   actualizarCabecera();
+  const cargaContratos = estado.contratos?.cargar();
   try {
     estado.nidos = await cargarNidos();
   } catch (e) {
     estado.error = `No se pudieron cargar los datos: ${e.message ?? e}`;
   }
+  await cargaContratos;
   estado.cargando = false;
   actualizarCabecera();
   pintarContenido();
 }
 
-const visibles = () => ordenar(filtrar(estado.nidos, estado.filtro));
+const contratosActivos = () => Boolean(estado.contratos?.disponible);
+
+function visibles() {
+  let lista = filtrar(estado.nidos, estado.filtro);
+  if (estado.filtro.contrato && contratosActivos()) {
+    const est = estado.contratos.estados();
+    lista = lista.filter((n) => grupoSemaforo(est.get(n.id)?.codigo) === estado.filtro.contrato);
+  }
+  return ordenar(lista);
+}
 
 function ordenar(lista) {
   const { clave, asc } = estado.orden;
-  const val = (n) => (clave === 'estado' ? estadoReproductivo(n) : n[clave]);
+  const est = clave === 'contrato' && contratosActivos() ? estado.contratos.estados() : null;
+  const val = (n) => (clave === 'estado' ? estadoReproductivo(n) : est ? (est.get(n.id)?.codigo ?? 'zz') : n[clave]);
   return [...lista].sort((a, b) => {
     const x = val(a), y = val(b);
     if (x == null && y == null) return 0;
@@ -238,6 +254,12 @@ function ordenar(lista) {
 
 // ── Pintado ─────────────────────────────────────────────────────────────────
 function pintarPanel() {
+  estado.contratos = crearControlador({
+    obtenerNidos: () => estado.nidos,
+    email: estado.sesion?.user?.email ?? '',
+    esAdmin: puedeEliminar(),
+    alCambiar: () => pintarContenido(),
+  });
   app.innerHTML = `
     <header class="top">
       <h1>GREFA · Campaña Aguilucho</h1>
@@ -248,6 +270,7 @@ function pintarPanel() {
       <button class="btn" id="btn-mapa" title="Ver todos los nidos en el mapa; al pinchar uno se abre su tarjeta">Mapa de nidos</button>
       <button class="btn" id="btn-csv">Exportar CSV</button>
       <button class="btn" id="btn-informes" title="Emitir informes técnicos editables (PDF / Word)">Informes</button>
+      <button class="btn" id="btn-contratos" title="Parcelas, propietarios y convenios firmados">Contratos</button>
       <button class="btn primario" id="btn-nuevo">+ Nuevo nido</button>
       ${exigeLogin ? '<button class="btn" id="btn-clave">Cambiar contraseña</button><button class="btn" id="btn-salir">Salir</button>' : ''}
     </header>
@@ -270,6 +293,7 @@ function pintarPanel() {
   document.getElementById('btn-recargar').onclick = recargar;
   document.getElementById('btn-csv').onclick = exportarCsv;
   document.getElementById('btn-informes').onclick = () => abrirInformes();
+  document.getElementById('btn-contratos').onclick = () => estado.contratos.abrir();
   document.getElementById('btn-mapa').onclick = () => {
     estado.vista = 'mapa';
     pintarContenido();
@@ -333,7 +357,7 @@ function pintarContenido() {
   else pintarTabla(lista);
 }
 
-const FILTRO_VACIO = { texto: '', pais: '', comunidad: '', provincia: '', localidad: '', especie: '', proyecto: '', estado: '' };
+const FILTRO_VACIO = { texto: '', pais: '', comunidad: '', provincia: '', localidad: '', especie: '', proyecto: '', estado: '', contrato: '' };
 
 function pintarFiltros(todos) {
   const el = document.getElementById('filtros');
@@ -354,6 +378,7 @@ function pintarFiltros(todos) {
     <select id="f-especie" title="Especie">${opts(ESPECIES, f.especie, 'Especie: todas')}</select>
     <select id="f-proyecto" title="Proyecto">${opts(PROYECTOS, f.proyecto, 'Proyecto: todos')}</select>
     <select id="f-estado" title="Estado reproductivo">${opts(['Éxito', 'Fracaso', 'En curso'], f.estado, 'Estado: todos')}</select>
+    ${contratosActivos() ? `<select id="f-contrato" title="Contrato de la parcela (campaña del nido)"><option value="">Contrato: todos</option>${Object.entries(FILTROS_CONTRATO).map(([k, l]) => `<option value="${k}" ${k === f.contrato ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>` : ''}
     <button class="btn" id="f-limpiar">Limpiar</button>`;
   el.dataset.listo = '1';
   // Al cambiar un nivel geográfico se reinician los inferiores y se repinta la cascada.
@@ -373,6 +398,7 @@ function pintarFiltros(todos) {
   enlazar('f-especie', 'especie');
   enlazar('f-proyecto', 'proyecto');
   enlazar('f-estado', 'estado');
+  if (document.getElementById('f-contrato')) enlazar('f-contrato', 'contrato');
   document.getElementById('f-limpiar').onclick = () => {
     estado.filtro = { ...FILTRO_VACIO };
     el.dataset.listo = '';
@@ -385,9 +411,14 @@ const TABLA_COLS = [
   ['num_pollos_volados', 'Vol.'], ['num_pollos_muertos', 'Muer.'], ['intervencion', 'Interv.'],
 ];
 
+function columnasTabla() {
+  return TABLA_COLS.flatMap((c) => (c[0] === 'estado' && contratosActivos() ? [c, ['contrato', 'Contrato']] : [c]));
+}
+
 function pintarTabla(lista) {
   destruirMapa();
   const cont = document.getElementById('contenido');
+  const est = contratosActivos() ? estado.contratos.estados() : null;
   if (!lista.length) {
     cont.innerHTML = `<div class="tarjeta vacio">${estado.cargando ? 'Cargando…' : 'No hay nidos con estos filtros.'}</div>`;
     return;
@@ -398,13 +429,13 @@ function pintarTabla(lista) {
     return `<tr data-id="${esc(n.id)}">
       <td>${esc(n.numeracion)}</td><td><b>${esc(n.etiqueta)}</b></td><td>${esc(n.municipio)}</td><td>${esc(n.provincia)}</td>
       <td>${esc(n.especie)}</td><td>${esc(n.estado_final)}</td>
-      <td><span class="chip ${claseEstado(e)}">${e}</span></td>
+      <td><span class="chip ${claseEstado(e)}">${e}</span></td>${est ? `<td>${puntoSemaforo(est.get(n.id)?.codigo)}</td>` : ''}
       <td class="num">${esc(n.num_pollos_nacidos)}</td><td class="num">${esc(n.num_pollos_volados)}</td>
       <td class="num">${esc(n.num_pollos_muertos)}</td>
       <td>${n.intervencion ? '<span class="chip interv">Sí</span>' : ''}</td></tr>`;
   }).join('');
   cont.innerHTML = `<div class="tarjeta tabla-wrap"><table>
-    <thead><tr>${TABLA_COLS.map(([k, l]) => `<th data-k="${k}">${l}${flecha(k)}</th>`).join('')}</tr></thead>
+    <thead><tr>${columnasTabla().map(([k, l]) => `<th data-k="${k}">${l}${flecha(k)}</th>`).join('')}</tr></thead>
     <tbody>${filas}</tbody></table></div>`;
   cont.querySelector('thead').onclick = (ev) => {
     const k = ev.target.dataset?.k;
@@ -427,7 +458,8 @@ function pintarMapa(lista) {
   const cont = document.getElementById('contenido');
   if (!document.getElementById('mapa')) {
     destruirMapa();
-    cont.innerHTML = '<div class="info" id="mapa-info"></div><div id="mapa"></div>';
+    cont.innerHTML = `<div class="mapa-barra"><span class="info" id="mapa-info"></span>
+      <label id="mapa-color-w" class="info" hidden>Color: <select id="mapa-color"><option value="resultado">Resultado de la nidificación</option><option value="contrato">Contrato de la parcela</option></select></label></div><div id="mapa"></div>`;
   }
   if (!estado.mapa) {
     estado.mapa = L.map('mapa').setView([40.4, -4.0], 6);
@@ -439,13 +471,22 @@ function pintarMapa(lista) {
   }
   estado.capa.clearLayers();
   const puntos = [];
+  const est = contratosActivos() ? estado.contratos.estados() : null;
+  if (!est) estado.colorMapa = 'resultado';
+  const porContrato = estado.colorMapa === 'contrato';
+  const selColor = document.getElementById('mapa-color');
+  document.getElementById('mapa-color-w').hidden = !est;
+  selColor.value = estado.colorMapa;
+  selColor.onchange = () => { estado.colorMapa = selColor.value; pintarContenido(); };
   for (const n of lista) {
     const p = posicion(n);
     if (!p) continue;
     const e = estadoReproductivo(n);
     // Al pinchar un nido se abre directamente su tarjeta completa (ficha).
-    L.circleMarker([p.lat, p.lon], { radius: 9, color: '#fff', weight: 2, fillColor: COLOR[e], fillOpacity: 0.95 })
-      .bindTooltip(`<b>${esc(n.etiqueta || n.numeracion || 'Nido')}</b><br>${esc(n.municipio)} · ${esc(n.especie)} · ${e}`, { direction: 'top' })
+    const cod = est?.get(n.id)?.codigo;
+    const color = porContrato && cod ? SEMAFORO[cod].color : COLOR[e];
+    L.circleMarker([p.lat, p.lon], { radius: 9, color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.95 })
+      .bindTooltip(`<b>${esc(n.etiqueta || n.numeracion || 'Nido')}</b><br>${esc(n.municipio)} · ${esc(n.especie)} · ${e}${cod ? `<br>${esc(SEMAFORO[cod].etiqueta)}` : ''}`, { direction: 'top' })
       .on('click', () => abrirFicha(estado.nidos.find((x) => x.id === n.id)))
       .addTo(estado.capa);
     puntos.push([p.lat, p.lon]);
@@ -453,7 +494,7 @@ function pintarMapa(lista) {
   const info = document.getElementById('mapa-info');
   if (info) {
     const sin = lista.length - puntos.length;
-    info.textContent = `${puntos.length} nidos ubicados en el mapa${sin > 0 ? ` · ${sin} sin coordenadas` : ''}. Pincha en uno para abrir su tarjeta completa.`;
+    info.textContent = `${puntos.length} nidos ubicados en el mapa${sin > 0 ? ` · ${sin} sin coordenadas` : ''}. Pincha en uno para abrir su tarjeta completa.${porContrato ? ' Color: verde = contrato firmado, naranja = pendiente o a punto de caducar, rojo = sin contrato, gris = sin parcela.' : ''}`;
   }
   // Solo se reencuadra cuando cambia el conjunto de puntos (no en cada refresco en vivo).
   const huella = puntos.length ? `${puntos.length}|${lista.map((n) => n.id).join(',')}` : '';
@@ -537,6 +578,7 @@ function abrirFicha(nido) {
     <div class="fase-tabs" id="fase-tabs">
       ${FASES.map((f) => `<button type="button" data-fase="${f.id}">${esc(f.titulo)}</button>`).join('')}
     </div>
+    ${esNuevo ? '' : '<div class="bloque-contrato" id="bloque-contrato" hidden></div>'}
     <div class="dlg-cuerpo" id="dlg-cuerpo">
       ${FASES.map((f) => `<fieldset data-fase="${f.id}"><legend>${f.titulo}</legend><div class="campos">
         ${COLUMNAS.filter((c) => c.fase === f.id).map((c) => campoHtml(c, base[c.key])).join('')}</div>
@@ -594,6 +636,11 @@ function abrirFicha(nido) {
     pintarVista();
   };
   pintarVista();
+  const bloque = document.getElementById('bloque-contrato');
+  if (bloque && contratosActivos()) {
+    bloque.hidden = false;
+    estado.contratos.bloqueFicha(bloque, base);
+  }
 
   document.getElementById('dlg-cerrar').onclick = () => dlg.close();
   const informeNido = document.getElementById('dlg-informe-nido');
@@ -634,6 +681,7 @@ function describirFiltros() {
     f.especie && `especie: ${f.especie}`,
     f.proyecto && `proyecto: ${f.proyecto}`,
     f.estado && `estado: ${f.estado}`,
+    f.contrato && `contrato: ${FILTROS_CONTRATO[f.contrato]}`,
   ].filter(Boolean).join('; ');
 }
 

@@ -155,65 +155,72 @@ export function abrirInformesUI(ctx) {
     };
   };
 
-  const pintarEditor = (html, opciones) => {
-    dlg.innerHTML = `<div class="inf-editor">
-      <div class="dlg-cab"><h2>${esc(opciones.titulo)}</h2><button type="button" class="btn" id="inf-cerrar">Cerrar</button></div>
-      <div class="inf-barra">
-        <span class="grupo">
-          <button type="button" class="btn" data-cmd="bold" title="Negrita"><b>N</b></button>
-          <button type="button" class="btn" data-cmd="italic" title="Cursiva"><i>K</i></button>
-          <button type="button" class="btn" data-cmd="underline" title="Subrayado"><u>S</u></button>
-          <button type="button" class="btn" data-cmd="insertUnorderedList" title="Lista con viñetas">• Lista</button>
-          <button type="button" class="btn" data-cmd="undo" title="Deshacer">↶</button>
-          <button type="button" class="btn" data-cmd="redo" title="Rehacer">↷</button>
-        </span>
-        <span class="grupo">
-          <button type="button" class="btn" id="inf-volver" title="Volver a las opciones (se perderán las ediciones)">← Opciones</button>
-          <button type="button" class="btn primario" id="inf-pdf" title="Abre el diálogo de impresión: elige «Guardar como PDF»">Imprimir / PDF</button>
-          <button type="button" class="btn" id="inf-word" title="Documento editable en Word / LibreOffice">Descargar Word</button>
-          <button type="button" class="btn" id="inf-html" title="Archivo HTML autocontenido">Descargar HTML</button>
-        </span>
-      </div>
-      <div class="inf-ayuda">Haz clic en cualquier parte del documento para editarlo (textos, tablas, justificaciones, conclusiones).</div>
-      <iframe id="inf-frame" title="Borrador del informe"></iframe>
-      <div class="dlg-pie"><span class="msg ok" id="inf-msg"></span></div>
-    </div>`;
-    const frame = document.getElementById('inf-frame');
-    const msg = (t, error = false) => {
-      const el = document.getElementById('inf-msg');
-      el.textContent = t;
-      el.classList.toggle('ok', !error);
-    };
-    frame.srcdoc = html;
-    frame.addEventListener('load', () => { frame.contentDocument.designMode = 'on'; }, { once: true });
-
-    const doc = () => frame.contentDocument;
-    const htmlActual = () => `<!DOCTYPE html>${doc().documentElement.outerHTML}`;
-
-    document.getElementById('inf-cerrar').onclick = () => dlg.close();
-    document.getElementById('inf-volver').onclick = () => {
-      if (confirm('Volverás a las opciones y se perderán las ediciones hechas en este borrador. ¿Continuar?')) pintarConfig();
-    };
-    dlg.querySelectorAll('[data-cmd]').forEach((b) => {
-      b.onmousedown = (ev) => ev.preventDefault(); // no pierde la selección del iframe
-      b.onclick = () => { frame.contentWindow.focus(); doc().execCommand(b.dataset.cmd); };
-    });
-    document.getElementById('inf-pdf').onclick = () => {
-      frame.contentWindow.focus();
-      frame.contentWindow.print();
-    };
-    document.getElementById('inf-word').onclick = async () => {
-      const inner = doc().documentElement.innerHTML;
-      const word = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">${inner}</html>`;
-      const r = await guardarArchivo(`\ufeff${word}`, nombreArchivo(opciones.referencia, 'doc'), 'application/msword', 'doc');
-      if (r) msg(`Guardado: ${r}`);
-    };
-    document.getElementById('inf-html').onclick = async () => {
-      const r = await guardarArchivo(htmlActual(), nombreArchivo(opciones.referencia, 'html'), 'text/html;charset=utf-8', 'html');
-      if (r) msg(`Guardado: ${r}`);
-    };
-  };
+  const pintarEditor = (html, opciones) => pintarEditorHtml(dlg, html, opciones, pintarConfig);
 
   pintarConfig();
   dlg.showModal();
+}
+
+/**
+ * Editor de un documento HTML (edición libre en pantalla; PDF por impresión, Word y HTML).
+ * lVolver es opcional: si se indica, aparece el botón «Volver».
+ */
+export function pintarEditorHtml(dlg, html, opciones, alVolver = null) {
+  dlg.innerHTML = `<div class="inf-editor">
+    <div class="dlg-cab"><h2>${esc(opciones.titulo)}</h2><button type="button" class="btn" id="inf-cerrar">Cerrar</button></div>
+    <div class="inf-barra">
+      <span class="grupo">
+        <button type="button" class="btn" data-cmd="bold" title="Negrita"><b>N</b></button>
+        <button type="button" class="btn" data-cmd="italic" title="Cursiva"><i>K</i></button>
+        <button type="button" class="btn" data-cmd="underline" title="Subrayado"><u>S</u></button>
+        <button type="button" class="btn" data-cmd="insertUnorderedList" title="Lista con viñetas">• Lista</button>
+        <button type="button" class="btn" data-cmd="undo" title="Deshacer">↶</button>
+        <button type="button" class="btn" data-cmd="redo" title="Rehacer">↷</button>
+      </span>
+      <span class="grupo">
+        ${alVolver ? '<button type="button" class="btn" id="inf-volver" title="Volver atrás (se perderán las ediciones)">← Volver</button>' : ''}
+        <button type="button" class="btn primario" id="inf-pdf" title="Abre el diálogo de impresión: elige «Guardar como PDF»">Imprimir / PDF</button>
+        <button type="button" class="btn" id="inf-word" title="Documento editable en Word / LibreOffice">Descargar Word</button>
+        <button type="button" class="btn" id="inf-html" title="Archivo HTML autocontenido">Descargar HTML</button>
+      </span>
+    </div>
+    <div class="inf-ayuda">Haz clic en cualquier parte del documento para editarlo (textos, tablas, justificaciones, conclusiones).</div>
+    <iframe id="inf-frame" title="Borrador del informe"></iframe>
+    <div class="dlg-pie"><span class="msg ok" id="inf-msg"></span></div>
+  </div>`;
+  const frame = document.getElementById('inf-frame');
+  const msg = (t, error = false) => {
+    const el = document.getElementById('inf-msg');
+    el.textContent = t;
+    el.classList.toggle('ok', !error);
+  };
+  frame.srcdoc = html;
+  frame.addEventListener('load', () => { frame.contentDocument.designMode = 'on'; }, { once: true });
+
+  const doc = () => frame.contentDocument;
+  const htmlActual = () => `<!DOCTYPE html>${doc().documentElement.outerHTML}`;
+
+  document.getElementById('inf-cerrar').onclick = () => dlg.close();
+  const volver = document.getElementById('inf-volver');
+if (volver) volver.onclick = () => {
+    if (confirm('Volverás atrás y se perderán las ediciones hechas en este borrador. ¿Continuar?')) alVolver();
+  };
+  dlg.querySelectorAll('[data-cmd]').forEach((b) => {
+    b.onmousedown = (ev) => ev.preventDefault(); // no pierde la selección del iframe
+    b.onclick = () => { frame.contentWindow.focus(); doc().execCommand(b.dataset.cmd); };
+  });
+  document.getElementById('inf-pdf').onclick = () => {
+    frame.contentWindow.focus();
+    frame.contentWindow.print();
+  };
+  document.getElementById('inf-word').onclick = async () => {
+    const inner = doc().documentElement.innerHTML;
+    const word = `<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">${inner}</html>`;
+    const r = await guardarArchivo(`\ufeff${word}`, nombreArchivo(opciones.referencia, 'doc'), 'application/msword', 'doc');
+    if (r) msg(`Guardado: ${r}`);
+  };
+  document.getElementById('inf-html').onclick = async () => {
+    const r = await guardarArchivo(htmlActual(), nombreArchivo(opciones.referencia, 'html'), 'text/html;charset=utf-8', 'html');
+    if (r) msg(`Guardado: ${r}`);
+  };
 }
