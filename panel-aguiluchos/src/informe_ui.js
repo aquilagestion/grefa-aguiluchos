@@ -6,6 +6,7 @@ import {
 import { agruparPorNivel } from './geo.js';
 import { posicion } from './logic.js';
 import { generarMapas } from './mapa_img.js';
+import { ayudaBtn } from './ayuda.js';
 
 const CLAVE_FIRMA = 'aguiluchos.informeFirma';
 
@@ -58,7 +59,7 @@ export function abrirInformesUI(ctx) {
 
   const pintarConfig = () => {
     dlg.innerHTML = `<form method="dialog" id="inf-form" class="inf-config">
-      <div class="dlg-cab"><h2>${nido ? `Informe del nido ${esc(nido.etiqueta || nido.numeracion || '')}` : 'Emitir informe técnico'}</h2>
+      <div class="dlg-cab"><h2>${nido ? `Informe del nido ${esc(nido.etiqueta || nido.numeracion || '')}` : 'Emitir informe técnico'}</h2>${ayudaBtn('informes')}
         <button type="button" class="btn" id="inf-cerrar">Cerrar</button></div>
       <div class="dlg-cuerpo">
         <p class="info">Los datos y cifras se calculan automáticamente; el texto es un borrador que podrás <b>editar libremente</b> antes de emitir el informe (PDF o Word).</p>
@@ -167,7 +168,7 @@ export function abrirInformesUI(ctx) {
  */
 export function pintarEditorHtml(dlg, html, opciones, alVolver = null) {
   dlg.innerHTML = `<div class="inf-editor">
-    <div class="dlg-cab"><h2>${esc(opciones.titulo)}</h2><button type="button" class="btn" id="inf-cerrar">Cerrar</button></div>
+    <div class="dlg-cab"><h2>${esc(opciones.titulo)}</h2>${ayudaBtn(opciones.ayuda ?? 'informe-editor')}<button type="button" class="btn" id="inf-cerrar">Cerrar</button></div>
     <div class="inf-barra">
       <span class="grupo">
         <button type="button" class="btn" data-cmd="bold" title="Negrita"><b>N</b></button>

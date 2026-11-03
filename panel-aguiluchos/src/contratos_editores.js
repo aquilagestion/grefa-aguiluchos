@@ -12,6 +12,7 @@ import {
   registrarDocumento, subirArchivo, urlDocumento, vincularNido,
 } from './contratos_api.js';
 import { borradorConvenio, borradorRgpd, htmlBorrador } from './contrato_borrador.js';
+import { ayudaBtn } from './ayuda.js';
 
 // ── Utilidades de formulario ─────────────────────────────────────────────────
 const val = (id) => document.getElementById(id)?.value ?? '';
@@ -36,10 +37,10 @@ function aviso(id, texto, ok = false) {
 }
 
 /** Abre un editor con cabecera, cuerpo y pie. */
-function abrirEditor(ctl, { titulo, cuerpo, ancho = '' }) {
+function abrirEditor(ctl, { titulo, cuerpo, ancho = '', ayuda = '' }) {
   const sub = ctl.subDialogo(ancho);
   sub.dlg.innerHTML = `<form method="dialog" class="ed-form">
-    <div class="dlg-cab"><h2>${esc(titulo)}</h2><button type="button" class="btn" data-cerrar>Cerrar</button></div>
+    <div class="dlg-cab"><h2>${esc(titulo)}</h2>${ayuda ? ayudaBtn(ayuda) : ''}<button type="button" class="btn" data-cerrar>Cerrar</button></div>
     <div class="dlg-cuerpo" id="ed-cuerpo">${cuerpo}</div>
     <div class="dlg-pie"><span class="msg" id="ed-msg"></span><span id="ed-acciones" style="display:contents"></span></div></form>`;
   sub.dlg.querySelector('[data-cerrar]').onclick = () => sub.cerrar();
@@ -154,9 +155,10 @@ export function editarPropietario(ctl, { propietario = null, alGuardar = null } 
   const p = propietario ?? { id: crypto.randomUUID(), tipo: 'particular' };
   const convenios = ctl.datos.contratos.filter((c) => c.propietario_id === p.id);
   const sub = abrirEditor(ctl, {
+    ayuda: 'propietario-editor',
     titulo: esNuevo ? 'Nuevo propietario' : `Propietario: ${p.nombre}`,
     cuerpo: `${camposPropietario(p, 'pr-')}
-      <fieldset><legend>Documentos del propietario</legend><div id="pr-docs"></div></fieldset>
+      <fieldset><legend>Documentos del propietario ${ayudaBtn('cv-documentos')}</legend><div id="pr-docs"></div></fieldset>
       ${esNuevo ? '' : `<fieldset><legend>Convenios</legend>${convenios.length
         ? convenios.map((c) => `<div>${esc(c.campana)} · ${esc(ETIQUETA_ESTADO[c.estado])} · ${esc(formatoEuros(c.importe_total))}</div>`).join('')
         : '<span class="info">Sin convenios.</span>'}</fieldset>`}`,
@@ -254,6 +256,7 @@ export function editarParcela(ctl, { parcela = null, nidoParaVincular = null, al
   const nidos = esNuevo ? [] : ctl.nidosDeParcela(p);
   const lineas = d.lineas.filter((l) => l.parcela_id === p.id);
   const sub = abrirEditor(ctl, {
+    ayuda: 'parcela-editor',
     titulo: esNuevo ? 'Nueva parcela' : `Parcela: ${descripcionParcela(p)}`,
     cuerpo: `${nidoParaVincular ? `<p class="info">Se creará con los datos del nido ${esc(nidoParaVincular.etiqueta || nidoParaVincular.numeracion || '')} y quedará vinculada a él.</p>` : ''}
       ${camposParcela(p, 'pa-')}
@@ -529,7 +532,7 @@ export function editarConvenio(ctl, op = {}) {
     }));
   };
 
-  const sub = abrirEditor(ctl, { titulo: '', cuerpo: '', ancho: 'ancho' });
+  const sub = abrirEditor(ctl, { titulo: '', cuerpo: '', ancho: 'ancho', ayuda: 'convenio-editor' });
   const cab = sub.dlg.querySelector('.dlg-cab h2');
   let guardadoOk = false;
   sub.dlg.addEventListener('close', () => op.alCerrar?.(guardadoOk));
@@ -563,7 +566,7 @@ export function editarConvenio(ctl, op = {}) {
     cab.textContent = esNuevo ? 'Nuevo convenio' : `Convenio ${c.campana} · ${d.propietarios.find((o) => o.id === c.propietario_id)?.nombre ?? ''}`;
     const cat = catalogo();
     dlgCuerpo.innerHTML = `
-      <fieldset><legend>Titular y campaña</legend><div class="campos">
+      <fieldset><legend>Titular y campaña ${ayudaBtn('cv-titular')}</legend><div class="campos">
         <div class="campo ancho"><label for="cv-prop">Propietario (titular)</label>
           <select id="cv-prop"><option value="">— Elige —</option><option value="${PROP_NUEVO}" ${E.propietarioId === PROP_NUEVO ? 'selected' : ''}>➕ Propietario nuevo…</option>
           ${d.propietarios.map((o) => `<option value="${esc(o.id)}" ${o.id === E.propietarioId ? 'selected' : ''}>${esc(o.nombre)}${o.nif ? ` · ${esc(o.nif)}` : ''}</option>`).join('')}</select></div>
@@ -574,7 +577,7 @@ export function editarConvenio(ctl, op = {}) {
       </div>
       ${E.propietarioId === PROP_NUEVO ? `<div class="sub-prop"><h4>Datos del propietario nuevo</h4>${camposPropietario(E.propietarioNuevo ?? { tipo: 'particular' }, 'cvp-')}</div>` : ''}
       </fieldset>
-      <fieldset><legend>Firma y vigencia</legend><div class="campos">
+      <fieldset><legend>Firma y vigencia ${ayudaBtn('cv-firma')}</legend><div class="campos">
         ${campo('cv-firma', 'Fecha de firma', c.fecha_firma, { tipo: 'date' })}
         ${campo('cv-desde', 'Vigencia desde', c.vigencia_desde, { tipo: 'date' })}
         ${campo('cv-hasta', 'Vigencia hasta', c.vigencia_hasta, { tipo: 'date' })}
@@ -582,12 +585,12 @@ export function editarConvenio(ctl, op = {}) {
         ${campo('cv-firmante', 'Firma por GREFA', c.firmante_grefa)}
         ${campo('cv-cargo', 'Cargo', c.cargo_firmante)}
       </div></fieldset>
-      <fieldset><legend>Parcelas del convenio (una parcela solo puede estar en un convenio por campaña)</legend>
+      <fieldset><legend>Parcelas del convenio (una parcela solo puede estar en un convenio por campaña) ${ayudaBtn('cv-parcelas')}</legend>
         <div id="cv-lineas">${E.lineas.map((l, i) => lineaHtml(l, i, ctl.datos, cat)).join('') || '<span class="info">Sin parcelas.</span>'}</div>
         <button type="button" class="btn" id="cv-add-linea">+ Añadir parcela</button>
       </fieldset>
-      <fieldset><legend>Nidos de este titular</legend>${nidosHtml()}</fieldset>
-      <fieldset><legend>Compensación económica</legend><div class="campos">
+      <fieldset><legend>Nidos de este titular ${ayudaBtn('cv-nidos')}</legend>${nidosHtml()}</fieldset>
+      <fieldset><legend>Compensación económica ${ayudaBtn('cv-compensacion')}</legend><div class="campos">
         ${campo('cv-total', 'Importe total del convenio (€)', c.importe_total, { tipo: 'number', extra: 'step="any" min="0"' })}
         ${campo('cv-pct', '% que se abona a la firma', c.pct_firma ?? 60, { tipo: 'number', extra: 'min="0" max="100" step="1"' })}
       </div>
@@ -596,7 +599,7 @@ export function editarConvenio(ctl, op = {}) {
       <table class="mini"><thead><tr><th>Concepto</th><th>Importe €</th><th>Prevista</th><th>Pagado el</th><th>Estado</th><th></th></tr></thead>
         <tbody id="cv-pagos">${E.pagos.map((p, i) => pagoHtml(p, i)).join('')}</tbody></table>
       <button type="button" class="btn" id="cv-add-pago">+ Añadir pago</button></fieldset>
-      <fieldset><legend>Documentos</legend>
+      <fieldset><legend>Documentos ${ayudaBtn('cv-documentos')}</legend>
         <p class="info">Convenio ya firmado: rellena los datos, pon el estado «Firmado» y sube aquí el PDF escaneado. También: consentimiento RGPD, DNI, titularidad de la cuenta, hoja catastral y croquis SIGPAC.</p>
         <div id="cv-docs"></div></fieldset>
       <div class="campos">${area('cv-obs', 'Observaciones', c.observaciones)}</div>`;
@@ -749,6 +752,7 @@ export function editarConvenio(ctl, op = {}) {
 // ── Importar convenios ya firmados (Mistral) ─────────────────────────────────
 export function importarEscaneado(ctl) {
   const sub = abrirEditor(ctl, {
+    ayuda: 'leer-firmados',
     titulo: 'Leer convenios firmados',
     cuerpo: `<p>Sube uno o varios convenios firmados (PDF o foto). Se leen con <b>Mistral</b> y se proponen titular, parcelas, ayudas e importe,
       <b>asociándolos a los propietarios, parcelas y nidos ya registrados</b>. Tú revisas cada uno antes de guardar; el archivo se conserva como «Convenio firmado».</p>
@@ -821,7 +825,7 @@ export function editarAyudas(ctl) {
   const programas = [...new Set([PROGRAMA_POR_DEFECTO, ...ctl.datos.ayudas.map((a) => a.programa)])];
   let programa = programas[0];
   let campana = Math.max(new Date().getFullYear(), ...ctl.datos.ayudas.filter((a) => a.programa === programa).map((a) => a.campana));
-  const sub = abrirEditor(ctl, { titulo: 'Catálogo de ayudas', cuerpo: '', ancho: 'ancho' });
+  const sub = abrirEditor(ctl, { titulo: 'Catálogo de ayudas', cuerpo: '', ancho: 'ancho', ayuda: 'ayudas' });
   let filas = [];
 
   const cargarFilas = () => {

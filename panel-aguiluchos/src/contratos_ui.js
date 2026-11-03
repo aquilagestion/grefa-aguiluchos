@@ -7,6 +7,7 @@ import {
 } from './contratos_logic.js';
 import { FaltanTablas, cargarDatosContratos, desvincularNido, mensajeError, vincularNido } from './contratos_api.js';
 import { htmlBorrador } from './contrato_borrador.js';
+import { AYUDA_TAB, ayudaBtn } from './ayuda.js';
 import {
   editarAyudas, editarConvenio, editarParcela, editarPropietario, importarEscaneado, parcelaDesdeNido,
 } from './contratos_editores.js';
@@ -74,7 +75,7 @@ export function crearControlador({ obtenerNidos, email, esAdmin, alCambiar }) {
   ctl.abrirBorrador = (titulo, cuerpo) => {
     const sub = ctl.subDialogo('informe-dlg');
     sub.dlg.showModal();
-    pintarEditorHtml(sub.dlg, htmlBorrador(cuerpo, titulo), { titulo, referencia: titulo }, null);
+    pintarEditorHtml(sub.dlg, htmlBorrador(cuerpo, titulo), { titulo, referencia: titulo, ayuda: 'borradores' }, null);
   };
 
   // ── Panel ──
@@ -97,7 +98,7 @@ export function crearControlador({ obtenerNidos, email, esAdmin, alCambiar }) {
   function pintarPanel() {
     const { dlg } = panel;
     const f = panel.filtros;
-    dlg.innerHTML = `<div class="dlg-cab"><h2>Contratos y parcelas</h2><button type="button" class="btn" id="pc-cerrar">Cerrar</button></div>
+    dlg.innerHTML = `<div class="dlg-cab"><h2>Contratos y parcelas</h2>${ayudaBtn(AYUDA_TAB[panel.tab] ?? 'contratos')}<button type="button" class="btn" id="pc-cerrar">Cerrar</button></div>
       <div class="dlg-cuerpo">
         ${ctl.disponible ? '' : `<div class="aviso error">${esc(ctl.error || 'Contratos no disponibles.')}</div>`}
         ${ctl.disponible ? avisosHtml() : ''}
@@ -259,7 +260,7 @@ export function crearControlador({ obtenerNidos, email, esAdmin, alCambiar }) {
       const est = ctl.estados().get(nido.id) ?? { codigo: 'sinparcela' };
       const explicito = ix.vinculo.has(nido.id);
       const parcelas = ctl.datos.parcelas;
-      contenedor.innerHTML = `<div class="bloque-cab">${puntoSemaforo(est.codigo)} <b>${esc(SEMAFORO[est.codigo].etiqueta)}</b>
+      contenedor.innerHTML = `<div class="bloque-cab">${puntoSemaforo(est.codigo)} <b>${esc(SEMAFORO[est.codigo].etiqueta)}</b> ${ayudaBtn('ficha-contrato')}
         ${est.campana ? `<span class="suave">· campaña ${est.campana}</span>` : ''}</div>
         ${est.parcela ? `<div class="bloque-fila">Parcela: <b>${esc(descripcionParcela(est.parcela))}</b>
           <button type="button" class="btn" data-acc="ver-parcela">Ver parcela</button>

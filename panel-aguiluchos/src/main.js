@@ -10,6 +10,7 @@ import { COLUMNAS, FASES, ESPECIES, PROYECTOS } from './columns.js';
 import { opcionesCascada } from './geo.js';
 import { abrirInformesUI } from './informe_ui.js';
 import { crearControlador, puntoSemaforo } from './contratos_ui.js';
+import { ayudaBtn, iniciarAyuda } from './ayuda.js';
 import { FILTROS_CONTRATO, SEMAFORO, grupoSemaforo } from './contratos_logic.js';
 import {
   aCsv, aplicarCambio, estadoReproductivo, filtrar, googleMapsUrl, parseValor, posicion, resumen, validar,
@@ -139,6 +140,7 @@ function pintarLogin(mensaje = '', modo = 'entrar', aviso = '') {
         <button class="btn" type="button" data-modo="registro">Crear cuenta (${DOMINIO})</button>` : '<button class="btn" type="button" data-modo="entrar">Volver a iniciar sesión</button>'}
       <p class="info" style="color:var(--rojo)">${esc(mensaje)}</p>
       <p class="info" style="color:var(--verde)">${esc(aviso)}</p>
+      <button class="btn" type="button" data-ayuda="acceso">? Ayuda para acceder</button>
     </form>`;
   document.querySelectorAll('[data-modo]').forEach((b) => (b.onclick = () => pintarLogin('', b.dataset.modo)));
   document.getElementById('form-login').addEventListener('submit', async (ev) => {
@@ -176,7 +178,7 @@ function pintarLogin(mensaje = '', modo = 'entrar', aviso = '') {
 function abrirCambioClave() {
   const dlg = document.getElementById('dlg');
   dlg.innerHTML = `<form method="dialog" id="form-clave" style="padding:20px;min-width:300px">
-    <h2>Cambiar contraseña</h2>
+    <h2>Cambiar contraseña ${ayudaBtn('cambiar-clave')}</h2>
     <div class="campo"><label for="clave-nueva">Contraseña nueva (mínimo ${MIN_CLAVE})</label><input type="password" id="clave-nueva" autocomplete="new-password" required /></div>
     <div class="campo"><label for="clave-repite">Repite la contraseña</label><input type="password" id="clave-repite" autocomplete="new-password" required /></div>
     <p class="info" id="clave-msg" style="color:var(--rojo)"></p>
@@ -272,6 +274,7 @@ function pintarPanel() {
       <button class="btn" id="btn-informes" title="Emitir informes técnicos editables (PDF / Word)">Informes</button>
       <button class="btn" id="btn-contratos" title="Parcelas, propietarios y convenios firmados">Contratos</button>
       <button class="btn primario" id="btn-nuevo">+ Nuevo nido</button>
+      <button class="btn" id="btn-ayuda" data-ayuda="inicio" title="Manual de ayuda (tecla F1)">Ayuda</button>
       ${exigeLogin ? '<button class="btn" id="btn-clave">Cambiar contraseña</button><button class="btn" id="btn-salir">Salir</button>' : ''}
     </header>
     <main>
@@ -281,6 +284,7 @@ function pintarPanel() {
       <nav class="tabs" id="tabs">
         <button data-vista="tabla">Tabla</button>
         <button data-vista="mapa">Mapa</button>
+        <span class="tabs-ayuda" id="tabs-ayuda"></span>
       </nav>
       <div class="grid2">
         <div id="contenido"></div>
@@ -341,13 +345,15 @@ function pintarContenido() {
     ['', r.nacidos, 'Pollos nacidos'],
     ['ok', r.volados, 'Pollos volados'],
     ['mal', r.muertos, 'Pollos muertos'],
-  ].map(([c, v, l]) => `<div class="kpi ${c}"><b>${esc(v)}</b><span>${l}</span></div>`).join('');
+  ].map(([c, v, l]) => `<div class="kpi ${c}"><b>${esc(v)}</b><span>${l}</span></div>`).join('')
+    + `<span class="ayuda-flot">${ayudaBtn('indicadores')}</span>`;
+  document.getElementById('tabs-ayuda').innerHTML = ayudaBtn(estado.vista === 'mapa' ? 'mapa' : 'tabla');
 
   pintarFiltros(todos);
 
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('activa', b.dataset.vista === estado.vista));
 
-  document.getElementById('causas').innerHTML = `<h3>Causas de fracaso</h3>${
+  document.getElementById('causas').innerHTML = `<h3>Causas de fracaso ${ayudaBtn('causas')}</h3>${
     r.causas.length
       ? r.causas.map(([k, n]) => `<div class="barra">${esc(k)} · <b>${n}</b><div style="width:${(n / r.causas[0][1]) * 100}%"></div></div>`).join('')
       : '<div class="info">Sin fracasos en la selección.</div>'
@@ -379,7 +385,7 @@ function pintarFiltros(todos) {
     <select id="f-proyecto" title="Proyecto">${opts(PROYECTOS, f.proyecto, 'Proyecto: todos')}</select>
     <select id="f-estado" title="Estado reproductivo">${opts(['Éxito', 'Fracaso', 'En curso'], f.estado, 'Estado: todos')}</select>
     ${contratosActivos() ? `<select id="f-contrato" title="Contrato de la parcela (campaña del nido)"><option value="">Contrato: todos</option>${Object.entries(FILTROS_CONTRATO).map(([k, l]) => `<option value="${k}" ${k === f.contrato ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>` : ''}
-    <button class="btn" id="f-limpiar">Limpiar</button>`;
+    <button class="btn" id="f-limpiar">Limpiar</button>${ayudaBtn('filtros')}`;
   el.dataset.listo = '1';
   // Al cambiar un nivel geográfico se reinician los inferiores y se repinta la cascada.
   const NIVELES = ['pais', 'comunidad', 'provincia', 'localidad'];
@@ -569,7 +575,7 @@ function abrirFicha(nido) {
   const p = posicion(base);
   dlg.innerHTML = `<form method="dialog" id="form-ficha">
     <div class="dlg-cab"><h2>${esNuevo ? 'Nuevo nido' : `Nido ${esc(base.etiqueta || base.numeracion || '')}`}</h2>
-      <button type="button" class="btn" id="dlg-cerrar">Cerrar</button></div>
+      ${ayudaBtn(esNuevo ? 'nuevo-nido' : 'ficha')}<button type="button" class="btn" id="dlg-cerrar">Cerrar</button></div>
     <div class="dlg-vista" id="dlg-vista">
       <span>Presentación:</span>
       <button type="button" data-modo="completa">Completa</button>
@@ -707,4 +713,5 @@ function exportarCsv() {
   URL.revokeObjectURL(a.href);
 }
 
+iniciarAyuda();
 iniciar();
