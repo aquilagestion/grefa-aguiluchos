@@ -1,4 +1,5 @@
 import { supabase } from './api.js';
+import { soloColumnas } from './contratos_logic.js';
 
 const BUCKET = 'contratos';
 const PAGINA = 1000;
@@ -72,7 +73,7 @@ const limpiar = (fila) => Object.fromEntries(Object.entries(fila).map(([k, v]) =
 
 /** Inserta o actualiza una fila y devuelve la fila guardada. */
 export async function guardarFila(tabla, fila, esNuevo) {
-  const f = limpiar(fila);
+  const f = limpiar(soloColumnas(tabla, fila));
   const { id, ...resto } = f;
   const q = esNuevo
     ? supabase.from(tabla).insert(id ? { id, ...resto } : resto)

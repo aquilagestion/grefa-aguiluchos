@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   avisosCaducidad, campanaDeNido, claveSigpac, compensacionACsv, descripcionParcela, estadoContratoNido, estadosPorNido,
-  esIbanEnmascarado, generarPagos, grupoSemaforo, importeSugeridoLinea, importeTotalLineas, indexarContratos, mascararIban,
+  esIbanEnmascarado, generarPagos, grupoSemaforo, importeSugeridoLinea, importeTotalLineas, indexarContratos, mascararIban, soloColumnas,
   normRefCat, resumenCompensacion, candidatosNidos, mismoNombre, normTelefono, validarContrato, validarParcela, validarPropietario,
 } from '../src/contratos_logic.js';
 
@@ -175,4 +175,11 @@ test('candidatos: por nombre y/o teléfono, sin los ya vinculados, los más segu
   assert.deepEqual(r.map((x) => x.nido.id), ['a', 'b', 'c']);
   assert.deepEqual(r[0].motivos, ['mismo nombre de propietario', 'mismo teléfono']);
   assert.equal(candidatosNidos(nidos, { nombre: null, telefono: null }).length, 0);
+});
+
+test('soloColumnas descarta campos de trabajo antes de escribir en la BD', () => {
+  const parcela = { id: 'p1', sigpac_poligono: '10', superficie_ha: 3.5, ayudas: [1, 4], nueva: true, importe: 100 };
+  assert.deepEqual(soloColumnas('parcelas_grefa', parcela), { id: 'p1', sigpac_poligono: '10', superficie_ha: 3.5 });
+  assert.deepEqual(soloColumnas('propietarios_grefa', { nombre: 'A', extra: 1 }), { nombre: 'A' });
+  assert.deepEqual(soloColumnas('contrato_pagos_grefa', { concepto: 'x', otro: 1 }), { concepto: 'x', otro: 1 });
 });

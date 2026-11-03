@@ -322,3 +322,20 @@ export function candidatosNidos(nidos, titular, excluir = new Set()) {
   }
   return out.sort((a, b) => b.fuerza - a.fuerza || String(a.nido.numeracion).localeCompare(String(b.nido.numeracion), 'es', { numeric: true }));
 }
+
+// ── Columnas reales de cada tabla ────────────────────────────────────────────
+// Se descartan los campos de trabajo (p. ej. «ayudas» de una parcela leída del convenio) antes de escribir en la BD.
+export const COLUMNAS = {
+  propietarios_grefa: ['id', 'nombre', 'tipo', 'entidad', 'nif', 'regepa', 'telefono', 'email', 'direccion', 'iban_enmascarado', 'rgpd_firmado', 'rgpd_fecha', 'notas'],
+  parcelas_grefa: ['id', 'pais', 'provincia', 'municipio', 'sigpac_provincia', 'sigpac_municipio', 'sigpac_agregado', 'sigpac_zona', 'sigpac_poligono',
+    'sigpac_parcela', 'sigpac_recinto', 'referencia_catastral', 'superficie_ha', 'uso', 'lat', 'lon', 'zona_programa', 'notas'],
+  contratos_grefa: ['id', 'propietario_id', 'campana', 'programa', 'zona_programa', 'estado', 'fecha_firma', 'vigencia_desde', 'vigencia_hasta',
+    'importe_total', 'pct_firma', 'lugar_firma', 'firmante_grefa', 'cargo_firmante', 'observaciones'],
+};
+
+/** Deja solo las columnas que existen en la tabla (las tablas sin lista se devuelven tal cual). */
+export function soloColumnas(tabla, fila) {
+  const cols = COLUMNAS[tabla];
+  if (!cols) return fila;
+  return Object.fromEntries(Object.entries(fila).filter(([k]) => cols.includes(k)));
+}
